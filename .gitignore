@@ -1,0 +1,4 @@
+start_app
+.venv
+.venv/
+start_app.spec

@@ -1,0 +1,25 @@
+
+on:
+  push:
+
+jobs:
+  windows_cmd_build:
+    name: windows_cmd
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    - run: call install_app_windows.bat
+      shell: cmd
+
+  windows_ps_build:
+    name: windows_ps
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    - run: ./install_app.sh
