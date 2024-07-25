@@ -58,8 +58,6 @@ class ETL_session(tk.Toplevel):
             self.etl = etl
             self.schema = schema
             self.master = master
-            print(self.tables)
-            print(self.sources)
             # Conexões genéricas para execução de DML/DDL (PySpark apenas executa queries para coleta de dados)
             # (auto-commit ON, usar a função commit() ou fetch() em operações DML/DDL causará erro,
             #  operações DML/DDL executadas seram aplicadas na base de dados automaticamente!)
@@ -376,9 +374,9 @@ class ETL_session(tk.Toplevel):
             query = f"SELECT text FROM all_views WHERE owner = '{self.user}' AND view_name = '{name}'"
         else:
             query = f"SELECT text, line FROM all_source WHERE owner = '{self.user}' AND name = '{name}' ORDER BY line"
-        source = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+        source = self.execute_spark_query('ora', query)
         query = f"SELECT referenced_name, referenced_type FROM all_dependencies WHERE owner = '{self.user}' AND name = '{name}' AND (referenced_type = 'PROCEDURE' OR referenced_type = 'FUNCTION' OR referenced_type = 'VIEW')"
-        dependencies = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+        dependencies = self.execute_spark_query('ora', query)
         if type == 'VIEW':
             source_body = [f"{self.normalize_name(name)} AS {source[0]['TEXT']}"]
         else:
@@ -427,7 +425,7 @@ class ETL_session(tk.Toplevel):
                     if tokens[aux].lower() in ['from', 'into', 'join']:
                         aux += 1
                         query = f"SELECT owner FROM all_views WHERE view_name = '{tokens[i].upper()}'"
-                        is_view = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+                        is_view = self.execute_spark_query('ora', query)
                         if len(is_view) > 0: 
                             if is_view[0]['OWNER'] == 'SYS':
                                 # Referencia a meta view, não traduzível!
@@ -575,7 +573,7 @@ class ETL_session(tk.Toplevel):
     def adapt2trig(self, source_name):
         self.write2display(f'Adaptando função {source_name} em trigger...')
         query = f"SELECT text FROM all_source WHERE owner = '{self.user}' AND name = '{source_name.upper()}' ORDER BY line"
-        data = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+        data = self.execute_spark_query('ora', query)
         data_body = [data[i]['TEXT'] for i in range(len(data))]
         tokens = []
         # Quebra o corpo dos dados em tokens para processamento
@@ -650,11 +648,14 @@ class ETL_session(tk.Toplevel):
                 line.insert(1, name)
             for token in line:
                 tokens.append(token)
+        # Transforma atributos genêricos a todos os tipos
         translatable = self.transform_attributes(tokens)
         if not translatable:
             self.write2display(f'{type} {source_name} não é traduzível e não será migrado!')
             return 'failed'
+        # Transforma algumas funções do sistema Oracle para versão apropriada em Postgres
         self.transform_system_function(tokens)
+        # Procura loops no corpo da source
         looper = self.search4loop(tokens)
         began = False
         factory_func = False
@@ -663,6 +664,7 @@ class ETL_session(tk.Toplevel):
         data_aux = {}
         if type == 'TRIGGER':
             for i in range(2, len(tokens)):
+                # Procura função do sistema que não foi transformada
                 if 'DBMS_' in tokens[i]:
                     unsupported = tokens[i]
                 if tokens[i].lower() == 'on':
@@ -674,6 +676,7 @@ class ETL_session(tk.Toplevel):
                     block_data = tokens[i:]
                     # Adapta bloco pl/sql em trigger_function compatível com Postgres
                     func = self.create_trigger_function(block_data, source_name)
+                    data_aux['trig_func'] = func
                     source_body += f"EXECUTE FUNCTION {func}();"
                     break
                 # Function call trigger
@@ -688,8 +691,8 @@ class ETL_session(tk.Toplevel):
                     # Coleta corpo da função e adapta como trigger_function compatível com Postgres
                     func = self.adapt2trig(name)
                     if func == 'failed':
-                        self.write2display(f'Função {name} não é traduzivel, logo ')
                         return 'failed'
+                    data_aux['trig_func'] = func
                     source_body += f"EXECUTE FUNCTION {func}"
                     continue
                 if i == len(tokens) - 1:
@@ -746,6 +749,7 @@ class ETL_session(tk.Toplevel):
                 else:
                     source_body += ' '
                 i += 1
+            # Adiciona exceção genêrica
             source_body += "EXCEPTION WHEN OTHERS THEN\nraise notice 'Transaction has failed and rolledback!';\nraise notice '% %', SQLERRM, SQLSTATE;"
             source_body += "\nEND;\n$$;"
         elif type == 'VIEW':
@@ -773,7 +777,7 @@ class ETL_session(tk.Toplevel):
             make_txt_file(source_name, source_body)
             return 'failed'
         if unsupported:
-            self.write2display(f"System call não suportada detectada em {source_name}\n{source_name} será adicionado em manual_migrations para migração manual!")
+            self.write2display(f"Função de sistema não suportada detectada em {source_name}\n{source_name} será adicionado em manual_migrations para migração manual!")
             make_txt_file(source_name, source_body)
             return 'failed'
         if source_name in [self.pg_source[i]['proname'] for i in range(len(self.pg_source))]:
@@ -788,6 +792,8 @@ class ETL_session(tk.Toplevel):
             self.write2display(f"{type} {source_name} carregado no Postgresql!")
             return self.test_source(data_aux, source_name, type)
         except Exception as e:
+            self.write2display(f'Algo deu errado na tradução do {type} {source_name}! Adicionado para migração manual!')
+            make_txt_file(source_name, source_body)
             print(f'Error: ' + str(e))
 
     # Testa se a tradução do plsql ocorreu sem erros
@@ -800,10 +806,12 @@ class ETL_session(tk.Toplevel):
                 cur.execute(f"SELECT tg.tgname FROM pg_proc AS pc \
                             JOIN pg_trigger AS tg ON pc.oid = tg.tgfoid \
                             JOIN pg_namespace AS ns ON pc.pronamespace = ns.oid \
-                            WHERE ns.nspname = '{self.schema}' AND pc.proname = 'fn_{name}'")
+                            WHERE ns.nspname = '{self.schema}' AND pc.proname = '{data['trig_func']}'")
                 res = cur.fetchall()
                 res = [res[i][0] for i in range(len(res))]
                 if name not in res:
+                    print('name ' + str(name))
+                    print(res)
                     self.write2display(f'{type} {name} não foi apropriadamente migrado, tente novamente!')
                     cur.close()
                     return 'failed'
@@ -815,10 +823,13 @@ class ETL_session(tk.Toplevel):
                 res = cur.fetchall()
                 res = [res[i][0] for i in range(len(res))]
                 if ref not in res:
+                    print('ref ' + str(ref))
+                    print(res)
                     self.write2display(f'{type} {name} não foi apropriadamente migrado, tente novamente!')
                     cur.close()
                     return 'failed'
             if type in ['FUNCTION', 'PROCEDURE']:
+                # Checa se função existe
                 cur.execute(f"SELECT * FROM pg_proc AS pc JOIN pg_namespace AS np \
                             ON pc.pronamespace = np.oid \
                             WHERE np.nspname = '{self.schema}' AND pc.proname = '{name}'")
@@ -829,15 +840,18 @@ class ETL_session(tk.Toplevel):
                     return 'failed'
                 # Talvez criar uma ferramenta que tenta executar a função (difícil)
             if type == 'VIEW':
+                # Checa se view existe
                 cur.execute(f"SELECT viewname FROM pg_views WHERE schemaname = '{self.schema}' AND viewname = '{name}'")
                 res = cur.fetchall()
                 if len(res) == 0:
                     self.write2display(f'{type} {name} não foi apropriadamente migrado, tente novamente!')
                     cur.close()
                     return 'failed'
+                # Testa query na view
                 cur.execute(f"SELECT * FROM {name} limit 1")
                 res = cur.fetchall()
             cur.close()
+            self.write2display(f'testes no {type} {name} concluídos sem problemas!')
             return 'done'
         except:
             self.write2display(f'Falha na tradução do plsql para o {type} {name}! :( )')
