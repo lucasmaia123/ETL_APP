@@ -301,7 +301,7 @@ class ETL_session(tk.Toplevel):
                 last_val = df['data'].agg({df['auto']: 'max'}).collect()[0]
                 cur.execute(f'''CREATE SEQUENCE IF NOT EXISTS {tbl}_{df['auto'].lower()}_seq START WITH {int(last_val[f"max({df['auto']})"])}''')
                 cur.execute(f'''ALTER TABLE {self.schema}.{tbl} ALTER COLUMN "{df['auto'].lower()}" SET DEFAULT nextval('{tbl}_{df['auto'].lower()}_seq')''')
-                cur.execute(f"ALTER SEQUENCE {tbl}_{df['auto'].lower()}_seq OWNER TO postgres")
+                cur.execute(f"ALTER SEQUENCE {tbl}_{df['auto'].lower()}_seq OWNER TO {self.user}")
         except Exception as e:
             self.write2display(f"Carregamento da tabela {tbl} falhou!\nObjetos dependentes não serão migrados!")
             print(e)
@@ -309,7 +309,7 @@ class ETL_session(tk.Toplevel):
         # Adiciona dependencias de chaves estrangeiras
         if df['fk']:
             for key, value in df['fk'].items():
-                cur.execute(f"ALTER TABLE {self.schema}.{value['src_table'].lower()} ADD CONSTRAINT {key} FOREIGN KEY {self.list2str(value['src_column'])} REFERENCES {value['ref_table'].lower()} {self.list2str(value['ref_column'])} ON DELETE {value['on_delete']}")
+                cur.execute(f"ALTER TABLE {self.schema}.{value['src_table'].lower()} ADD CONSTRAINT {key} FOREIGN KEY {self.list2str(value['src_column'])} REFERENCES {self.schema}.{value['ref_table'].lower()} {self.list2str(value['ref_column'])} ON DELETE {value['on_delete']}")
         self.write2display(f"{df['data'].count()} colunas importadas da tabela {tbl} para postgres!")
         cur.close()
         return self.test_table(df, tbl)
@@ -389,7 +389,7 @@ class ETL_session(tk.Toplevel):
         res = self.transform_source(source_body, self.normalize_name(name), type)
         return [res, data, None]
 
-    # Remove aspas e adiciona schema ao nome de um objeto
+    # Remove aspas e schema do nome de um objeto
     def normalize_name(self, name):
         if '.' in name:
             name = name.split('.')
@@ -398,14 +398,12 @@ class ETL_session(tk.Toplevel):
                 if '"' in name[i]:
                     name[i] = name[i].removeprefix('"')
                     name[i] = name[i].removesuffix('"')
-            if self.schema != 'public':
-                return f"{self.schema}.{name[1]}"
-            return name[1]
+            if name[0].lower() != self.schema:
+                return None
+            return name[1].lower()
         elif '"' in name:
             name = name.removeprefix('"')
             name = name.removesuffix('"')
-        if self.schema != 'public':
-            return f"{self.schema}.{name}"
         return name.lower()
 
     # Traduz elementos oracle genêricos em elementos postgresql
@@ -536,7 +534,7 @@ class ETL_session(tk.Toplevel):
     # Postgresql só executa trigger com chamada de função, cria um trigger com a função apropriada
     def create_trigger_function(self, data, name, attributes = None):
         fn_name = f"fn_{name}"
-        func_body = f"CREATE OR REPLACE FUNCTION {fn_name}() RETURNS TRIGGER LANGUAGE PLPGSQL AS \n$$\n"
+        func_body = f"CREATE OR REPLACE FUNCTION {self.schema}.{fn_name}() RETURNS TRIGGER LANGUAGE PLPGSQL AS \n$$\n"
         for i, token in enumerate(data):
             if i == 0:
                 # Funções de trigger no postgres não podem receber parâmetros diretamente
@@ -588,6 +586,8 @@ class ETL_session(tk.Toplevel):
                     line.insert(1, source_name)
                 else:
                     source_name = self.normalize_name(line[1])
+                    if not source_name:
+                        return 'failed'
                     line[1] = source_name
             for token in line:
                 tokens.append(token)
@@ -636,7 +636,9 @@ class ETL_session(tk.Toplevel):
 
     # Faz transformações no escopo do tipo de precedure
     def transform_source(self, data, source_name, type):
-        source_body = f"CREATE OR REPLACE {type} {source_name} "
+        if not source_name:
+            return 'failed'
+        source_body = f"CREATE OR REPLACE {type} {self.schema}.{source_name} "
         tokens = []
         # Quebra o corpo dos dados em tokens para processamento
         for i, line in enumerate(data):
@@ -668,7 +670,8 @@ class ETL_session(tk.Toplevel):
                 if 'DBMS_' in tokens[i]:
                     unsupported = tokens[i]
                 if tokens[i].lower() == 'on':
-                    self.normalize_name(tokens[i+1])
+                    if not self.normalize_name(tokens[i+1]):
+                        return 'failed'
                     data_aux['trig_ref'] = tokens[i+1]
                     source_body += '\n'
                 if tokens[i].lower() == 'declare' or tokens[i].lower() == 'begin':
@@ -786,7 +789,6 @@ class ETL_session(tk.Toplevel):
         else:
             self.write2display(f'Carregando {type} {source_name} no Postgresql...')
         try:
-            print(source_body)
             cur.execute(source_body)
             cur.close()
             self.write2display(f"{type} {source_name} carregado no Postgresql!")
@@ -810,8 +812,6 @@ class ETL_session(tk.Toplevel):
                 res = cur.fetchall()
                 res = [res[i][0] for i in range(len(res))]
                 if name not in res:
-                    print('name ' + str(name))
-                    print(res)
                     self.write2display(f'{type} {name} não foi apropriadamente migrado, tente novamente!')
                     cur.close()
                     return 'failed'
@@ -830,7 +830,7 @@ class ETL_session(tk.Toplevel):
                     return 'failed'
             if type in ['FUNCTION', 'PROCEDURE']:
                 # Checa se função existe
-                cur.execute(f"SELECT * FROM pg_proc AS pc JOIN pg_namespace AS np \
+                cur.execute(f"SELECT proname FROM pg_proc AS pc JOIN pg_namespace AS np \
                             ON pc.pronamespace = np.oid \
                             WHERE np.nspname = '{self.schema}' AND pc.proname = '{name}'")
                 res = cur.fetchall()

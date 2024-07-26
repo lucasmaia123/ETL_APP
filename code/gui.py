@@ -204,7 +204,7 @@ class etl_UI(tk.Frame):
             if self.migration_direction.get() == 1:
                 Oracle2Postgres(self, etl)
             if self.migration_direction.get() == 2:
-                self.message_window('Não implementado!')
+                Postgres2Oracle(self, etl)
             response.config(text='')
 
     # Testa as credenciais de conexão fornecidas
@@ -367,7 +367,7 @@ class Oracle2Postgres(tk.Toplevel):
                 if schema.lower() in self.pg_schemas:
                     self.schema_exists(schema)
                 else:
-                    self.migrate_user_window(schema)
+                    self.migrate_schema(schema)
            # Migração de objetos
             else:
                 self.draw_table_selection_window(schema)
@@ -387,11 +387,12 @@ class Oracle2Postgres(tk.Toplevel):
         cur.execute(f'DROP SCHEMA IF EXISTS {schema} CASCADE')
         cur.execute(f'CREATE SCHEMA {schema}')
         cur.close()
-        query = f"SELECT table_name FROM all_tables WHERE owner = '{user.upper()}'"
-        tables = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+        self.pg_schema = schema.lower()
+        query = f"SELECT table_name FROM all_tables WHERE owner = '{schema.upper()}'"
+        tables = self.execute_spark_query('ora', query)
         tables = [tables[i]['TABLE_NAME'] for i in range(len(tables))]
-        query = f"SELECT name, type FROM all_source where owner = '{user.upper()}' AND line = 1 UNION SELECT view_name, 'VIEW' FROM all_views where owner = '{user.upper()}'"
-        sources = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+        query = f"SELECT name, type FROM all_source where owner = '{schema.upper()}' AND line = 1 UNION SELECT view_name, 'VIEW' FROM all_views where owner = '{schema.upper()}'"
+        sources = self.execute_spark_query('ora', query)
         sources = [[sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
         self.etl_initialization(tables, sources)
 
@@ -595,13 +596,13 @@ class Oracle2Postgres(tk.Toplevel):
 
         ttk.Button(self, text='Selecionar todos', command=lambda: table_listbox.select_set(0, tk.END)).pack(anchor='w', padx=20)
 
-        s_mode = tk.StringVar()
+        s_mode = tk.IntVar()
 
-        c1 = ttk.Radiobutton(self, text='Migrar todos os procedimentos relacionados', variable=s_mode, value='1')
+        c1 = ttk.Radiobutton(self, text='Migrar todos os procedimentos relacionados', variable=s_mode, value=0)
         c1.pack()
-        c2 = ttk.Radiobutton(self, text='Migrar todos os procedimentos na base de dados', variable=s_mode, value='2')
+        c2 = ttk.Radiobutton(self, text='Migrar todos os procedimentos na base de dados', variable=s_mode, value=1)
         c2.pack()
-        c3 = ttk.Radiobutton(self, text='Selecionar os procedimentos manualmente', variable=s_mode, value='3')
+        c3 = ttk.Radiobutton(self, text='Selecionar os procedimentos manualmente', variable=s_mode, value=2)
         c3.pack()
 
         c1.invoke()
@@ -619,7 +620,8 @@ class Oracle2Postgres(tk.Toplevel):
 
     # Checa se as tabelas a serem migradas já existem no schema
     def check_existing_tables(self, table_listbox, s_mode):
-        if len(table_listbox.curselection()) == 0:
+        if len(table_listbox.curselection()) == 0 and s_mode.get() == 0:
+            self.message_window('Selecione algum objeto para migrar!')
             return
         self.pg_schema = self.schema_entry.get()
         if self.pg_schema == '':
@@ -703,18 +705,19 @@ class Oracle2Postgres(tk.Toplevel):
 
     # Remove tabelas existentes que usuário não quer substituir
     def update_tables(self, tables, pg_tables, listbox, s_mode):
-        keep_tables = []
+        override_tables = []
         for i in listbox.curselection():
-            keep_tables.append(listbox.get(i))
+            override_tables.append(listbox.get(i))
         aux_table = deepcopy(tables)
         for table in aux_table:
-            if table.lower() in pg_tables and table not in keep_tables:
+            # Se tabela já existe e não está marcada para substituição, remove da migração
+            if table.lower() in pg_tables and table not in override_tables:
                 tables.remove(table)
         self.source_selection_window(tables, s_mode)
 
     # Idem com seleção de tabelas, mas agora para procedimentos guardados
     def source_selection_window(self, tables, s_mode):
-        if s_mode.get() in ['1', '2']:
+        if s_mode.get() < 2:
             window = tk.Toplevel(self)
             window.geometry('600x400')
             ttk.Label(window, text='Procedimentos sendo migrados:').pack(padx=20, pady=10)
@@ -728,7 +731,7 @@ class Oracle2Postgres(tk.Toplevel):
             textbox.pack(expand=True, fill='both')
 
             # Migra procedimentos relacionados
-            if s_mode.get() == '1':
+            if s_mode.get() == 0:
                 for table in tables:
                     query = f"SELECT DISTINCT name, type FROM all_dependencies WHERE referenced_name = '{table}' AND owner = '{self.user}'"
                     sources = self.execute_spark_query('ora', query)
@@ -737,7 +740,7 @@ class Oracle2Postgres(tk.Toplevel):
                     textbox.insert(tk.END, f'{source[0]}    {source[1]}\n')
             
             # Migra todos os procedimentos
-            elif s_mode.get() == '2':
+            elif s_mode.get() == 1:
                 query = f"SELECT DISTINCT name, type FROM all_dependencies WHERE owner = '{self.user}'"
                 sources = self.execute_spark_query('ora', query)
                 sources = [[sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
@@ -757,7 +760,7 @@ class Oracle2Postgres(tk.Toplevel):
             ttk.Button(lower_frame, text='Concordar', command=lambda: [self.etl_initialization(tables, sources), window.destroy()]).pack(side='right', padx=20, pady=10)
 
         # Seleciona manualmente procedimentos a serem migrados
-        elif s_mode.get() == '3':
+        elif s_mode.get() == 2:
             window = tk.Toplevel(self)
             window.geometry('600x400')
             query = f"SELECT name, type FROM all_source where owner = '{self.user}' AND line = 1 UNION SELECT view_name, 'VIEW' FROM all_views where owner = '{self.user}'"
@@ -785,17 +788,18 @@ class Oracle2Postgres(tk.Toplevel):
             ttk.Button(lower_frame, text='Prosseguir', command=lambda: [self.etl_initialization(tables, source_listbox), window.destroy()]).pack(side='right', padx=20, pady=10)
 
     # Coleta os nomes dos objetos selecionados pelo usuário para iniciar a migração
-    def etl_initialization(self, tables, sources):
-        if len(tables) == 0 and len(sources.curselection()) == 0:
-            window = tk.Toplevel(self)
-            ttk.Label(window, text='Nenhuma tabela ou procedimento selecionado\nRetornando ao menu inicial').pack(padx=10, pady=10)
-            ttk.Button(window, text='Ok', command=window.destroy).pack(pady=10)
-            self.wait_window(window)
-            if self.ora_dba:
-                self.draw_schema_selection_window()
-            else:
-                self.draw_table_selection_window(self.ora_user.upper())
-            return
+    def etl_initialization(self, tables, sources, outer_refs=[]):
+        if len(tables) == 0 and type(sources) != list:
+            if len(sources.curselection()) == 0:
+                window = tk.Toplevel(self)
+                ttk.Label(window, text='Nenhuma tabela ou procedimento selecionado\nRetornando ao menu inicial').pack(padx=10, pady=10)
+                ttk.Button(window, text='Ok', command=window.destroy).pack(pady=10)
+                self.wait_window(window)
+                if self.ora_dba:
+                    self.draw_schema_selection_window()
+                else:
+                    self.draw_table_selection_window(self.ora_user.upper())
+                return
         if type(sources) != list:
             selected_sources = []
             for i in sources.curselection():
@@ -803,7 +807,6 @@ class Oracle2Postgres(tk.Toplevel):
                 selected_sources.append([split_src[0], split_src[1]])
         else:
             selected_sources = sources
-        outer_references = []
         dep_tables = set()
         # Detecta dependencias entre tabelas
         for table in tables:
@@ -816,7 +819,7 @@ class Oracle2Postgres(tk.Toplevel):
                 # checa se tabela a qual depende pertence a um schema que não é o usuário
                 if r_owner != self.user.upper():
                     r_tables.remove(r_tables[i])
-                    outer_references.append([tables.pop(tables.index(table)), 'TABELA', r_owner, r_name, 'TABELA'])
+                    outer_refs.append([tables.pop(tables.index(table)), 'TABELA', r_owner, r_name, 'TABELA'])
             r_tables = [r_tables[i]['TABLE_NAME'] for i in range(len(r_tables))]
             for tab in r_tables:
                 if tab not in tables:
@@ -835,11 +838,11 @@ class Oracle2Postgres(tk.Toplevel):
                     r_name = dependencies[i]['REFERENCED_NAME']
                     if r_owner != self.user.upper():
                         dependencies.remove(dependencies[i])
-                        outer_references.append(selected_sources.pop(selected_sources.index(src)))
-                        outer_references[-1] = list(outer_references[-1])
-                        outer_references[-1].append(r_owner)
-                        outer_references[-1].append(r_name)
-                        outer_references[-1].append(r_type)
+                        outer_refs.append(selected_sources.pop(selected_sources.index(src)))
+                        outer_refs[-1] = list(outer_refs[-1])
+                        outer_refs[-1].append(r_owner)
+                        outer_refs[-1].append(r_name)
+                        outer_refs[-1].append(r_type)
                 dependencies = [[dependencies[i]['REFERENCED_NAME'], dependencies[i]['REFERENCED_TYPE']] for i in range(len(dependencies))]
                 # Detecta se procedimento depende de alguma tabela
                 for dep in dependencies:
@@ -850,10 +853,10 @@ class Oracle2Postgres(tk.Toplevel):
                         dep_sources.add(tuple(dep))
             dep_sources = list(dep_sources)
         dep_tables = list(dep_tables)
-        if len(dep_tables) > 0 or len(dep_sources) > 0 or len(outer_references) > 0:
-            self.draw_dep_window(dep_tables, tables, dep_sources, selected_sources, outer_references)
+        if len(dep_tables) > 0 or len(dep_sources) > 0 or len(outer_refs) > 0:
+            self.draw_dep_window(dep_tables, tables, dep_sources, selected_sources, outer_refs)
         else:
-            self.begin_etl_session(tables, selected_sources)
+            self.begin_etl_session(tables, selected_sources, outer_refs)
 
     # Lista dependencias entre os objetos escolhidos e pede permissão para incluí-los à migração
     def draw_dep_window(self, dep_tables, sel_tables, dep_sources, sel_sources, outer_references):
@@ -885,7 +888,7 @@ class Oracle2Postgres(tk.Toplevel):
             textBox2.config(state='disabled')
         lower_frame = ttk.Frame(window)
         lower_frame.pack()
-        ttk.Button(lower_frame, text='Concordar', command=lambda: [self.begin_etl_session(sel_tables, sel_sources, outer_references), window.destroy()]).pack(side='right', padx=20, pady=10)
+        ttk.Button(lower_frame, text='Concordar', command=lambda: [self.etl_initialization(sel_tables, sel_sources, outer_references), window.destroy()]).pack(side='right', padx=20, pady=10)
         ttk.Button(lower_frame, text='Cancelar', command=lambda: window.destroy()).pack(side='left', padx=20, pady=10)
 
     # Inicializa a sessão de etl e começa a migrar
@@ -980,7 +983,7 @@ class Postgres2Oracle(tk.Toplevel):
         query = "SELECT nspname FROM pg_namespace ns WHERE pg_catalog.has_schema_privilege(current_user, ns.nspname, 'USAGE') = 'true' \
                 AND ns.nspname != 'information_schema' AND ns.nspname not like 'pg_%'"
         schemas = self.execute_spark_query('pg', query)
-        schemas = [schemas[i]['USERNAME'] for i in range(len(schemas))]
+        schemas = [schemas[i]['nspname'] for i in range(len(schemas))]
 
         ttk.Label(self, text='Selecione o schema que deseja migrar').pack(padx=20, pady=10)
         user_frame = ttk.Frame(self, height=300)
@@ -997,10 +1000,96 @@ class Postgres2Oracle(tk.Toplevel):
 
         scrollBar.config(command=listbox.yview)
 
-        self.user_migration = tk.BooleanVar()
+        self.migration_mode = tk.IntVar()
 
         lower_frame = ttk.Frame(self)
         lower_frame.pack()
-        ttk.Checkbutton(lower_frame, text='Migrar schema (Cria novo usuário e migra todos os seus objetos)', variable=self.user_migration, onvalue=True, offvalue=False).pack(side='top', pady=10)
+        mmref = ttk.Checkbutton(lower_frame, text='Migrar tabelas (Migra alguns objetos do schema selecionado para o schema Oracle conectado)', variable=self.migration_mode, onvalue=0)
+        mmref.pack(padx=20, pady=20)
+        ttk.Checkbutton(lower_frame, text='Migrar schema (Migra todos os objetos do schema selecionado para um schema Oracle)', variable=self.migration_mode, onvalue=1).pack(padx=20, pady=20)
+        ttk.Checkbutton(lower_frame, text='Migrar usuário (Cria um novo usuário/schema Oracle e migra tudo que pertence ao usuário)', variable=self.migration_mode, onvalue=2).pack(padx=20, pady=20)
+        mmref.invoke()
         ttk.Button(lower_frame, text='Cancelar', command=self.close).pack(side='left', padx=20, pady=10)
         ttk.Button(lower_frame, text='Prosseguir', command=lambda:self.pass_schema_selection(listbox)).pack(side='right', padx=20, pady=10)
+
+    # Função auxiliar para a seleção de schema
+    def pass_schema_selection(self, listbox):
+        try:
+            schema = listbox.get(listbox.curselection()[0])
+            if schema:
+                self.user = schema
+            else:
+                return
+            self.ora_users = self.execute_spark_query('ora', "SELECT username FROM all_users WHERE oracle_maintained == 'N'")
+            self.ora_users = [self.ora_users[i]['USERNAME'] for i in range(len(self.ora_users))]
+            # Migração de usuário/schema
+            if self.migration_mode.get() > 0 and not self.ora_dba:
+                    self.message_window('Para migrar um schema, por favor logue como um usuário DBA Oracle!')
+                    return
+            elif self.migration_mode.get() == 1:
+                self.schema_migration_window(schema)
+            elif self.migration_mode.get() == 2:
+                if schema.lower() in self.ora_users:
+                    self.user_exists(schema)
+                else:
+                    self.migrate_schema(schema)
+           # Migração de objetos
+            else:
+                self.draw_table_selection_window(schema)
+        except Exception as e:
+            print('Error: ' + str(e))
+
+    def schema_migration_window(self, schema):
+        window = tk.Toplevel(self)
+        ttk.Label(window, text=f'Como prosseguir com a migração do schema {schema}?').pack(padx=20, pady=10)
+        new_user = tk.BooleanVar()
+        cbref = ttk.Checkbutton(window, text='Migrar objetos para schema conectado', variable=new_user, onvalue=False)
+        cbref.pack(padx=20, pady=10)
+        cbref.invoke()
+        ttk.Checkbutton(window, text='Criar novo usuário/schema Oracle', variable=new_user, onvalue=True).pack(padx=20, pady=10)
+        ttk.Button(window, text='Prosseguir', command=lambda:[self.pass_schema_migration(schema, new_user.get()), window.destroy()]).pack(side='right', padx=20, pady=10)
+        ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=10)
+
+    def pass_schema_migration(self, schema, new_user):
+        if new_user:
+            self.new_user_window(schema)
+        else:
+            self.migrate_schema(schema)
+
+    # Pergunta o que fazer quando usuário já existe
+    def check_if_user_exists(self, pg_schema, ora_user, password, dba):
+        if user.upper() in self.ora_users:
+            window = tk.Toplevel(self)
+            ttk.Label(window, text=f'Usuário/Schema {ora_user} já existe na base de dados!\nQual ação deseja tomar?').pack(padx=10, pady=10)
+            ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=10)
+            ttk.Button(window, text='Deletar e prosseguir', command=lambda:[self.migrate(user, True, password, dba), window.destroy()]).pack(side='left', padx=20, pady=10)
+            ttk.Button(window, text='Manter e prosseguir', command=lambda:[self.migrate_schema(user), window.destroy()]).pack(side='left', padx=20, pady=10)
+        else:
+            self.migrate_schema(user, True, password, dba)
+
+    def new_user_window(self, user):
+        window = tk.Toplevel(self)
+        ttk.Label(window, text='Digite um nome para o novo usuário:').pack(padx=20, pady=10)
+        user_entry = ttk.Entry(window, width=30)
+        user_entry.pack(padx=20, pady=10)
+        user_entry.insert(0, user)
+        ttk.Label(window, text='Digite uma senha para o novo usuário:').pack(padx=20, pady=10)
+        password_entry = ttk.Entry(window, width=30)
+        password_entry.pack(padx=20, pady=10)
+        dba_user = tk.BooleanVar()
+        ttk.Checkbutton(window, text='Criar novo usuário como DBA', variable=dba_user, onvalue=True, offvalue=False).pack(padx=20, pady=10)
+        ttk.Button(window, text='Prosseguir', command=lambda:[self.check_if_user_exists(user, user_entry.get(), password_entry.get(), dba_user.get()), window.destroy()]).pack(side='right', padx=20, pady=20)
+        ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)
+        
+    def migrate_schema(self, pg_schema, new_user=None, new_user_pass='', new_dba_user=False):
+        cur = self.ora_conn.cursor()
+        if new_user:
+            if len(new_user_pass) == 0:
+                self.message_window('Digite uma senha para o novo usuário!')
+                return self.new_user_window(pg_schema)
+            cur.execute(f'DROP USER {new_user} CASCADE')
+            cur.execute(f'CREATE USER {new_user} IDENTIFIED BY {new_user_pass}')
+            if new_dba_user:
+                cur.execute(f"GRANT DBA TO {new_user}")
+        self.schema = new_user
+        # Diferenciar entre pg_schema e ora_schema e coletar objetos do schema postgres

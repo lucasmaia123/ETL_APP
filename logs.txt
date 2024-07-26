@@ -5,3 +5,45 @@
 25/07/2024 09:59:47 Sessão 8784923675141: Migração concluída com sucesso!
 25/07/2024 09:59:47 Sessão 8784923675141: Arquivo de backup não encontrado, prosseguindo...
 25/07/2024 09:59:47 Sessão 8784923675141: Terminada sessão de ETL 8784923545497
+26/07/2024 08:54:33 Sessão 8728294100461: Iniciando sessão 8728294746849 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 08:57:04 Sessão 8794324631749: Iniciando sessão 8794268898537 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 08:57:13 Sessão 8794324631749: Criando backup do schema teste
+26/07/2024 08:57:13 Sessão 8794324631749: Iniciando sessão 8794268898537 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 08:57:13 Sessão 8794324631749: migrando tabelas ['EMP', 'DEPT'] e sources [['TEST_PROC', 'PROCEDURE']] do Oracle schema 'TESTE' para Postgres database postgres schema 'teste'!
+26/07/2024 08:57:19 Sessão 8794324631749: Migração falhou! Retornando base de dados para estado anterior...
+26/07/2024 08:57:19 Sessão 8794324631749: Base de dados retornada ao último estado estável
+26/07/2024 08:57:19 Sessão 8794324631749: Terminada sessão de ETL 8794268898501
+26/07/2024 09:04:43 Sessão 8747170153721: Iniciando sessão 8747035337969 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 09:04:53 Sessão 8747170153721: Criando backup do schema teste
+26/07/2024 09:04:53 Sessão 8747170153721: Iniciando sessão 8747035337969 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 09:04:53 Sessão 8747170153721: migrando tabelas ['EMP', 'DEPT'] e sources [['TEST_PROC', 'PROCEDURE']] do Oracle schema 'TESTE' para Postgres database postgres schema 'teste'!
+26/07/2024 09:05:01 Sessão 8747170153721: Migração concluída com sucesso!
+26/07/2024 09:05:01 Sessão 8747170153721: Terminada sessão de ETL 8747035337933
+26/07/2024 09:10:50 Sessão 8761332472085: Iniciando sessão 8761197790625 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 09:11:11 Sessão 8761332472085: Criando backup do schema teste
+26/07/2024 09:11:11 Sessão 8761332472085: Iniciando sessão 8761197790625 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 09:11:11 Sessão 8761332472085: migrando tabelas ['EMP'] e sources [['TEST_PROC', 'PROCEDURE']] do Oracle schema 'TESTE' para Postgres database postgres schema 'teste'!
+26/07/2024 09:11:14 Sessão 8761332472085: Migração falhou! Retornando base de dados para estado anterior...
+26/07/2024 09:11:14 Sessão 8761332472085: Base de dados retornada ao último estado estável
+26/07/2024 09:11:14 Sessão 8761332472085: Terminada sessão de ETL 8761197790489
+26/07/2024 09:32:02 Sessão 8737508843737: Iniciando sessão 8737508862613 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 09:33:59 Sessão 8789631525081: Iniciando sessão 8789576391161 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 09:34:22 Sessão 8789631525081: Criando backup do schema teste
+26/07/2024 09:34:22 Sessão 8789631525081: Iniciando sessão 8789576391161 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 09:34:22 Sessão 8789631525081: migrando tabelas ['EMP'] e sources [['TEST_PROC', 'PROCEDURE']] do Oracle schema 'TESTE' para Postgres database postgres schema 'teste'!
+26/07/2024 09:34:24 Sessão 8789631525081: Migração falhou! Retornando base de dados para estado anterior...
+26/07/2024 09:34:24 Sessão 8789631525081: Base de dados retornada ao último estado estável
+26/07/2024 09:34:24 Sessão 8789631525081: Terminada sessão de ETL 8789576390897
+26/07/2024 09:39:53 Sessão 8760547919373: Iniciando sessão 8760548943581 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 09:43:59 Sessão 8753555504113: Iniciando sessão 8753501452813 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 09:44:20 Sessão 8753555504113: Criando backup do schema teste
+26/07/2024 09:44:21 Sessão 8753555504113: Iniciando sessão 8753501452813 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 09:44:21 Sessão 8753555504113: migrando tabelas ['EMP', 'DEPT'] e sources [['TEST_PROC', 'PROCEDURE']] do Oracle schema 'TESTE' para Postgres database postgres schema 'teste'!
+26/07/2024 09:44:29 Sessão 8753555504113: Migração concluída com sucesso!
+26/07/2024 09:44:29 Sessão 8753555504113: Terminada sessão de ETL 8753501452549
+26/07/2024 10:11:49 Sessão 8734170490145: Iniciando sessão 8734035819465 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 10:12:06 Sessão 8734170490145: Criando backup do schema teste
+26/07/2024 10:12:06 Sessão 8734170490145: Iniciando sessão 8734035819465 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+26/07/2024 10:12:06 Sessão 8734170490145: migrando tabelas ['EMP', 'DEPT'] e sources [['TEST_PROC', 'PROCEDURE']] do Oracle schema 'TESTE' para Postgres database postgres schema 'teste'!
+26/07/2024 10:12:13 Sessão 8734170490145: Migração concluída com sucesso!
+26/07/2024 10:12:13 Sessão 8734170490145: Terminada sessão de ETL 8734035739993
