@@ -954,13 +954,11 @@ class Postgres2OracleETL(ETL_session_UI):
         table_data['fk'] = {}
         table_data['auto'] = None
         # Encontra as chaves primarias
-        pk_query = f"SELECT cols.table_name, cons.constraint_name, cols.column_name \
-                    FROM all_cons_columns cols, all_constraints cons \
-                    WHERE cols.owner = '{self.user}' AND cons.owner = '{self.user}' AND cols.table_name = '{table_name}' AND cons.table_name = '{table_name}' \
-                    AND cons.constraint_type = 'P' \
-                    AND cons.constraint_name = cols.constraint_name \
-                    AND cols.owner = cons.owner"
-        pk = self.execute_spark_query('ora', pk_query)
+        pk_query = f"select column_name from information_schema.constraint_column_usage where constraint_name in \
+                    (select conname from pg_constraint con join pg_namespace as nsp on con.connamespace = nsp.oid \
+                    join pg_class as cls on con.conrelid = cls.oid \
+                    where nsp.nspname = 'public' and con.contype = 'p' and cls.relname = 'employees')"
+        pk = self.execute_spark_query('pg', pk_query)
         if pk:
             pk = [pk[i]['COLUMN_NAME'] for i in range(len(pk))]
             table_data['pk'] = pk
