@@ -28,7 +28,7 @@ def make_txt_file(name, body):
         file.write(body)
         file.close()
 
-class ETL_session(tk.Toplevel):
+class ETL_session_UI(tk.Toplevel):
 
     # Dicionário para organizar migração paralela
     dependency_futures = {}
@@ -113,6 +113,10 @@ class ETL_session(tk.Toplevel):
             self.oracle_conn.close()
         self.destroy()
         self.S.release()
+
+class Oracle2PostgresETL(ETL_session_UI):
+    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema):
+        super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema)
 
     # Começa a extrair os dados das tabelas do cluster cujo foi estabelecida a conexão
     @threaded
@@ -638,7 +642,11 @@ class ETL_session(tk.Toplevel):
     def transform_source(self, data, source_name, type):
         if not source_name:
             return 'failed'
-        source_body = f"CREATE OR REPLACE {type} {self.schema}.{source_name} "
+        if type == 'TRIGGER':
+            # Em Postgres, triggers herdam o schema da tabela relacionada
+            source_body = f"CREATE OR REPLACE {type} {source_name} "
+        else:
+            source_body = f"CREATE OR REPLACE {type} {self.schema}.{source_name} "
         tokens = []
         # Quebra o corpo dos dados em tokens para processamento
         for i, line in enumerate(data):
@@ -680,7 +688,7 @@ class ETL_session(tk.Toplevel):
                     # Adapta bloco pl/sql em trigger_function compatível com Postgres
                     func = self.create_trigger_function(block_data, source_name)
                     data_aux['trig_func'] = func
-                    source_body += f"EXECUTE FUNCTION {func}();"
+                    source_body += f"EXECUTE FUNCTION {self.schema}.{func}();"
                     break
                 # Function call trigger
                 if tokens[i].lower() == 'call':
@@ -696,7 +704,7 @@ class ETL_session(tk.Toplevel):
                     if func == 'failed':
                         return 'failed'
                     data_aux['trig_func'] = func
-                    source_body += f"EXECUTE FUNCTION {func}"
+                    source_body += f"EXECUTE FUNCTION {self.schema}.{func}"
                     continue
                 if i == len(tokens) - 1:
                     source_body += tokens[i] + ';'
@@ -823,8 +831,6 @@ class ETL_session(tk.Toplevel):
                 res = cur.fetchall()
                 res = [res[i][0] for i in range(len(res))]
                 if ref not in res:
-                    print('ref ' + str(ref))
-                    print(res)
                     self.write2display(f'{type} {name} não foi apropriadamente migrado, tente novamente!')
                     cur.close()
                     return 'failed'
@@ -857,3 +863,168 @@ class ETL_session(tk.Toplevel):
             self.write2display(f'Falha na tradução do plsql para o {type} {name}! :( )')
             cur.close()
             return 'failed'
+        
+class Postgres2OracleETL(ETL_session_UI):
+    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema):
+        super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema)
+
+    # Começa a extrair os dados das tabelas do cluster cujo foi estabelecida a conexão
+    @threaded
+    def start_etl(self):
+        try:
+            self._state = 'executing'
+            self.done_drawing = False
+            self.draw_app_window()
+            while not self.done_drawing:
+                pass
+            query = f'''SELECT table_name FROM all_users WHERE owner = '{self.schema}' AND tablespace_name not like 'SYS%' '''
+            self.ora_tables = self.execute_spark_query('ora', query)
+            query = f"SELECT name, type FROM all_source WHERE owner = '{self.schema}' AND line = 1 \
+                    UNION SELECT view_name, 'VIEW' FROM all_views WHERE owner = '{self.schema}'"
+            self.ora_sources = self.execute_spark_query('ora', query)
+            # Executa extração de cada tabela/source em threads assincronas
+            # O número no método define quantos objetos serão extraídos simultaneamente
+            # Aumentar este valor fará o processo mais rápido mas poderá causar instabilidades
+            with ThreadPoolExecutor(5) as executor:
+                failures = []
+                for table in self.tables:
+                    self.table_queue.put_nowait(table)
+                sleep(1)
+                while not self.table_queue.empty():
+                    while not self.table_queue.empty():
+                        table = self.table_queue.get_nowait()
+                        print(f'table {table}')
+                        self.dependency_futures[table] = executor.submit(self.extract_table, table)
+                    for future in as_completed(self.dependency_futures.values()):
+                        res = future.result()
+                        name = res[1]
+                        dep = res[2]
+                        if res[0] == 'failed':
+                            failures.append(name)
+                        if res[0] == 'waiting':
+                            self.dependency_futures[name].cancel()
+                            if dep in failures:
+                                failures.append(name)
+                            if name not in failures:
+                                self.table_queue.put_nowait(name)
+                wait(list(self.dependency_futures.values()))
+                self.dependency_futures = {}
+                for source in self.sources:
+                    self.source_queue.put_nowait(source)
+                sleep(1)
+                while not self.source_queue.empty():
+                    while not self.source_queue.empty():
+                        source = self.source_queue.get_nowait()
+                        print(f'source {source}')
+                        self.dependency_futures[source[0]] = executor.submit(self.extract_source, source)
+                    for future in as_completed(self.dependency_futures.values()):
+                        res = future.result()
+                        name = res[1][0]
+                        dep = res[2]
+                        if res[0] == 'failed':
+                            failures.append(name)
+                        if res[0] == 'waiting':
+                            self.dependency_futures[name].cancel()
+                            if dep in failures:
+                                failures.append(name)
+                            if name not in failures:
+                                self.source_queue.put_nowait(res[1])
+                executor.shutdown(wait=True)
+            sleep(1)
+            self.write2display('Concluído!')
+            if len(failures) > 0:
+                self.write2display(f'Falhas: {failures}')
+            self.information_label.config(text='Migração concluída!')
+            self.button.config(text='Ok')
+            self._state = 'success'
+        except Exception as e:
+            self.write2display('Migração falhou!')
+            self._state = 'failed'
+            self.error_message = e
+
+    # Coleta informações sobre uma tabela do cluster
+    def extract_table(self, table):
+        table_schema = table[0]
+        table_name = table[1]
+        self.write2display(f'Coletando {table_schema}.{table_name}...')
+        table_data = {}
+        # Pega informações sobre as colunas da tabela
+        data = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, dbtable=f'{table_schema}.{table_name}').load()
+        table_data['data'] = data
+        table_data['fk'] = {}
+        table_data['auto'] = None
+        # Encontra as chaves primarias
+        pk_query = f"SELECT cols.table_name, cons.constraint_name, cols.column_name \
+                    FROM all_cons_columns cols, all_constraints cons \
+                    WHERE cols.owner = '{self.user}' AND cons.owner = '{self.user}' AND cols.table_name = '{table_name}' AND cons.table_name = '{table_name}' \
+                    AND cons.constraint_type = 'P' \
+                    AND cons.constraint_name = cols.constraint_name \
+                    AND cols.owner = cons.owner"
+        pk = self.execute_spark_query('ora', pk_query)
+        if pk:
+            pk = [pk[i]['COLUMN_NAME'] for i in range(len(pk))]
+            table_data['pk'] = pk
+        # Encontra as chaves estrangeiras
+        fk_query = f"SELECT cols.table_name, cons.constraint_name, cols.column_name \
+                    FROM all_constraints cons, all_cons_columns cols \
+                    WHERE cols.owner = '{self.user}' AND cons.owner = '{self.user}' \
+                    AND cols.table_name = '{table_name}' AND cons.table_name = '{table_name}' \
+                    AND cons.constraint_type = 'R' \
+                    AND cons.constraint_name = cols.constraint_name \
+                    AND cols.owner = cons.owner \
+                    ORDER BY cols.table_name"
+        fk = self.execute_spark_query('ora', fk_query)
+        fk_dict = {}
+        # Organiza as chaves estrangeiras em relação aos nomes de seus constraints
+        for key in fk:
+            if key['CONSTRAINT_NAME'] in fk_dict.keys():
+                fk_dict[key['CONSTRAINT_NAME']].append(key['COLUMN_NAME'])
+            else:
+                fk_dict[key['CONSTRAINT_NAME']] = [key['COLUMN_NAME']]
+        if fk:
+            # Encontra as referencias das chaves estrangeiras
+            for constraint, columns in fk_dict.items():
+                ref_query = f"SELECT cols.table_name, cols.column_name, cons.delete_rule, cols.owner \
+                            FROM all_cons_columns cols, all_constraints cons \
+                            WHERE cols.constraint_name in \
+                            (SELECT r_constraint_name FROM all_constraints \
+                            WHERE owner = '{self.user}' AND constraint_name = '{constraint}') \
+                            AND cols.constraint_name = cons.r_constraint_name \
+                            AND cons.owner = '{self.user}' AND cons.table_name = '{table_name}'"
+                ref = self.execute_spark_query('ora', ref_query)
+                ref_columns = [ref[i]['COLUMN_NAME'] for i in range(len(ref))]
+                table_data['fk'][constraint] = {'src_table': table_name,'src_column': columns,'ref_table': ref[0]['TABLE_NAME'], 'ref_column': ref_columns, 'on_delete': ref[0]['DELETE_RULE']}
+        # Coleta as dependencias da tabela
+        dp_query = f"select name, type, referenced_name, referenced_type from all_dependencies where name in (select name from all_dependencies where referenced_name = '{table_name}')"
+        dependencies = self.execute_spark_query('ora', dp_query)
+        # Coleta as informações especificas às colunas
+        tab_query = f"select column_name, data_type, data_default from all_tab_columns where table_name = '{table_name}'"
+        cdata = self.execute_spark_query('ora', tab_query)
+        # Identifica e classifica as dependencias
+        for dep in dependencies:
+            # Chaves primarias com auto incremento definida com trigger
+            if dep['TYPE'] == 'TRIGGER' and dep['REFERENCED_TYPE'] == 'SEQUENCE':
+                if len(pk) == 1:
+                    table_data['auto'] = pk[0]
+                else:
+                    query = f"select column_name from all_triggers where trigger_name = '{dep['NAME']}'"
+                    column = self.execute_spark_query('ora', query)
+                    if column[0]:
+                        table_data['auto'] = column[0]
+                table_data['seq'] = dep['REFERENCED_NAME']
+        for column in cdata:
+            # Chave primaria com auto incremento definida com IDENTITY
+            if column['DATA_DEFAULT']:
+                table_data['auto'] = pk[pk.index(column['COLUMN_NAME'])]
+                table_data['seq'] = column['DATA_DEFAULT'].split('.')[1]
+        if table_name in self.pg_tables:
+            self.write2display(f'{table_name} já existe no postgres, substituindo...')
+        if fk:
+            for value in table_data['fk'].values():
+                # Espera pela extração de uma tabela a qual depende
+                if (self.dependency_futures[value['ref_table']]._state == 'PENDING' or not self.dependency_futures[value['ref_table']].done()) and value['ref_table'] != table_name:
+                    self.write2display(f"Tabela {table_name} depende da tabela {value['ref_table']}, adiando extração...")
+                    return ['waiting', table_name, value['ref_table']]
+        self.write2display(f"Extração concluída na tabela {table_name}")
+        res = self.load_table(table_data, table_name.lower())
+        return [res, table_name, None]

@@ -47,3 +47,17 @@
 26/07/2024 10:12:06 Sessão 8734170490145: migrando tabelas ['EMP', 'DEPT'] e sources [['TEST_PROC', 'PROCEDURE']] do Oracle schema 'TESTE' para Postgres database postgres schema 'teste'!
 26/07/2024 10:12:13 Sessão 8734170490145: Migração concluída com sucesso!
 26/07/2024 10:12:13 Sessão 8734170490145: Terminada sessão de ETL 8734035739993
+29/07/2024 09:23:10 Sessão 8780736580093: Iniciando sessão 8780601761073 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+29/07/2024 09:23:52 Sessão 8780736580093: Criando backup do schema public
+29/07/2024 09:23:52 Sessão 8780736580093: Iniciando sessão 8780601761073 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+29/07/2024 09:23:52 Sessão 8780736580093: migrando tabelas ['CARS', 'EMPLOYEES', 'FOREIGN_TEST', 'PK_TESTE', 'REPORTS', 'TESTE'] e sources [['TEST_VIEW2', 'VIEW'], ['GERA_TESTE_ID', 'TRIGGER'], ['TESTE_TRIG', 'TRIGGER'], ['TEST_VIEW', 'VIEW'], ['DEBUG_TEST', 'FUNCTION'], ['TRIG_TEST', 'TRIGGER'], ['CAR_OWNER', 'PROCEDURE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+29/07/2024 09:24:06 Sessão 8780736580093: Migração concluída com sucesso!
+29/07/2024 09:24:06 Sessão 8780736580093: Terminada sessão de ETL 8780601761061
+29/07/2024 09:35:37 Sessão 8742754982217: Iniciando sessão 8742701071177 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+29/07/2024 09:36:24 Sessão 8742754982217: Criando backup do schema public
+29/07/2024 09:36:24 Sessão 8742754982217: Iniciando sessão 8742701071177 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+29/07/2024 09:36:24 Sessão 8742754982217: migrando tabelas ['CARS', 'EMPLOYEES', 'FOREIGN_TEST', 'PK_TESTE', 'REPORTS', 'TESTE'] e sources [['TEST_VIEW2', 'VIEW'], ['GERA_TESTE_ID', 'TRIGGER'], ['TESTE_TRIG', 'TRIGGER'], ['TEST_VIEW', 'VIEW'], ['DEBUG_TEST', 'FUNCTION'], ['TRIG_TEST', 'TRIGGER'], ['CAR_OWNER', 'PROCEDURE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+29/07/2024 09:36:36 Sessão 8742754982217: Migração concluída com sucesso!
+29/07/2024 09:36:36 Sessão 8742754982217: Terminada sessão de ETL 8742701050173
+30/07/2024 11:40:19 Sessão 8749693550789: Iniciando sessão 8749693125969 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+01/08/2024 11:47:17 Sessão 8759302218249: Iniciando sessão 8759248197613 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
