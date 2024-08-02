@@ -954,44 +954,36 @@ class Postgres2OracleETL(ETL_session_UI):
         table_data['fk'] = {}
         table_data['auto'] = None
         # Encontra as chaves primarias
-        pk_query = f"select column_name from information_schema.constraint_column_usage where constraint_name in \
-                    (select conname from pg_constraint con join pg_namespace as nsp on con.connamespace = nsp.oid \
-                    join pg_class as cls on con.conrelid = cls.oid \
-                    where nsp.nspname = 'public' and con.contype = 'p' and cls.relname = 'employees')"
+        pk_query = f"SELECT ccu.column_name FROM information_schema.table_constraints tc \
+                    JOIN information_schema.constraint_column_usage AS ccu ON tc.constraint_name = ccu.constraint_name \
+                    WHERE tc.table_schema = '{table_schema}' AND tc.table_name = '{table_name}' AND tc.constraint_type = 'PRIMARY KEY'"
         pk = self.execute_spark_query('pg', pk_query)
         if pk:
             pk = [pk[i]['COLUMN_NAME'] for i in range(len(pk))]
             table_data['pk'] = pk
         # Encontra as chaves estrangeiras
-        fk_query = f"SELECT cols.table_name, cons.constraint_name, cols.column_name \
-                    FROM all_constraints cons, all_cons_columns cols \
-                    WHERE cols.owner = '{self.user}' AND cons.owner = '{self.user}' \
-                    AND cols.table_name = '{table_name}' AND cons.table_name = '{table_name}' \
-                    AND cons.constraint_type = 'R' \
-                    AND cons.constraint_name = cols.constraint_name \
-                    AND cols.owner = cons.owner \
-                    ORDER BY cols.table_name"
-        fk = self.execute_spark_query('ora', fk_query)
+        fk_query = f"SELECT tc.constraint_name, kcu.column_name \
+                    FROM information_schema.table_constraints tc \
+                    JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name \
+                    WHERE tc.table_schema = '{table_schema}' AND tc.table_name = '{table_name}' AND tc.constraint_type = 'FOREIGN KEY'"
+        fk = self.execute_spark_query('pg', fk_query)
         fk_dict = {}
         # Organiza as chaves estrangeiras em relação aos nomes de seus constraints
         for key in fk:
-            if key['CONSTRAINT_NAME'] in fk_dict.keys():
-                fk_dict[key['CONSTRAINT_NAME']].append(key['COLUMN_NAME'])
+            if key['constraint_name'] in fk_dict.keys():
+                fk_dict[key['constraint_name']].append(key['column_name'])
             else:
-                fk_dict[key['CONSTRAINT_NAME']] = [key['COLUMN_NAME']]
+                fk_dict[key['constraint_name']] = [key['column_name']]
         if fk:
             # Encontra as referencias das chaves estrangeiras
             for constraint, columns in fk_dict.items():
-                ref_query = f"SELECT cols.table_name, cols.column_name, cons.delete_rule, cols.owner \
-                            FROM all_cons_columns cols, all_constraints cons \
-                            WHERE cols.constraint_name in \
-                            (SELECT r_constraint_name FROM all_constraints \
-                            WHERE owner = '{self.user}' AND constraint_name = '{constraint}') \
-                            AND cols.constraint_name = cons.r_constraint_name \
-                            AND cons.owner = '{self.user}' AND cons.table_name = '{table_name}'"
-                ref = self.execute_spark_query('ora', ref_query)
-                ref_columns = [ref[i]['COLUMN_NAME'] for i in range(len(ref))]
-                table_data['fk'][constraint] = {'src_table': table_name,'src_column': columns,'ref_table': ref[0]['TABLE_NAME'], 'ref_column': ref_columns, 'on_delete': ref[0]['DELETE_RULE']}
+                ref_query = f"select ccu.table_schema, ccu.table_name, ccu.column_name, rc.delete_rule \
+                            from information_schema.constraint_column_usage ccu \
+                            JOIN information_schema.referential_constraints AS rc ON ccu.constraint_name = rc.constraint_name \
+                            WHERE ccu.constraint_name = '{constraint}'"
+                ref = self.execute_spark_query('pg', ref_query)
+                ref_columns = [ref[i]['column_name'] for i in range(len(ref))]
+                table_data['fk'][constraint] = {'src_schema': table_schema, 'src_table': table_name, 'src_column': columns, 'ref_schema': ref[0]['table_schema'], 'ref_table': ref[0]['table_name'], 'ref_column': ref_columns, 'on_delete': ref[0]['delete_rule']}
         # Coleta as dependencias da tabela
         dp_query = f"select name, type, referenced_name, referenced_type from all_dependencies where name in (select name from all_dependencies where referenced_name = '{table_name}')"
         dependencies = self.execute_spark_query('ora', dp_query)

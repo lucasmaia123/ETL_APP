@@ -55,5 +55,17 @@ if command -v python &> /dev/null;
          exit
 fi
 
+if ! command -v pip &> /dev/null;
+   then
+      echo "pip não instalado, tentando instalar o pip..."
+      $python -m ensurepip --upgrade
+      if ! command -v pip /dev/null:
+         then
+            echo "Falha na instalação do pip, por favor instale o pip e tente novamente!"
+            read -p "Press any button to continue..."
+            exit
+      fi
+fi
+
 create_venv
 install_app
