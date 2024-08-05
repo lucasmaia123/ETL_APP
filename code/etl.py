@@ -137,8 +137,10 @@ class Oracle2PostgresETL(ETL_session_UI):
                 self.write2display(f'Schema {self.schema} criado no Postgres!')
             query = f'''SELECT table_name FROM information_schema.tables WHERE table_schema = '{self.schema}' '''
             self.pg_tables = self.execute_spark_query('pg', query)
+            self.pg_tables = [self.pg_tables[i]['table_name'] for i in range(len(self.pg_tables))]
             query = f'''SELECT proname FROM pg_proc p join pg_namespace n on n.oid = p.pronamespace where nspname = '{self.schema}' '''
             self.pg_source = self.execute_spark_query('pg', query)
+            self.pg_source = [self.pg_source[i]['proname'] for i in range(len(self.pg_source))]
             # Executa extração de cada tabela/source em threads assincronas
             # O número no método define quantos objetos serão extraídos simultaneamente
             # Aumentar este valor fará o processo mais rápido mas poderá causar instabilidades
@@ -251,26 +253,11 @@ class Oracle2PostgresETL(ETL_session_UI):
                 ref = self.execute_spark_query('ora', ref_query)
                 ref_columns = [ref[i]['COLUMN_NAME'] for i in range(len(ref))]
                 table_data['fk'][constraint] = {'src_table': table_name,'src_column': columns,'ref_table': ref[0]['TABLE_NAME'], 'ref_column': ref_columns, 'on_delete': ref[0]['DELETE_RULE']}
-        # Coleta as dependencias da tabela
-        dp_query = f"select name, type, referenced_name, referenced_type from all_dependencies where name in (select name from all_dependencies where referenced_name = '{table_name}')"
-        dependencies = self.execute_spark_query('ora', dp_query)
         # Coleta as informações especificas às colunas
         tab_query = f"select column_name, data_type, data_default from all_tab_columns where table_name = '{table_name}'"
         cdata = self.execute_spark_query('ora', tab_query)
-        # Identifica e classifica as dependencias
-        for dep in dependencies:
-            # Chaves primarias com auto incremento definida com trigger
-            if dep['TYPE'] == 'TRIGGER' and dep['REFERENCED_TYPE'] == 'SEQUENCE':
-                if len(pk) == 1:
-                    table_data['auto'] = pk[0]
-                else:
-                    query = f"select column_name from all_triggers where trigger_name = '{dep['NAME']}'"
-                    column = self.execute_spark_query('ora', query)
-                    if column[0]:
-                        table_data['auto'] = column[0]
-                table_data['seq'] = dep['REFERENCED_NAME']
+        # Checa se chave primaria com auto incremento foi definida com IDENTITY
         for column in cdata:
-            # Chave primaria com auto incremento definida com IDENTITY
             if column['DATA_DEFAULT']:
                 table_data['auto'] = pk[pk.index(column['COLUMN_NAME'])]
                 table_data['seq'] = column['DATA_DEFAULT'].split('.')[1]
@@ -290,7 +277,7 @@ class Oracle2PostgresETL(ETL_session_UI):
     def load_table(self, df, tbl):
         # Estabelece conexão genérica
         cur = self.pg_conn.cursor()
-        if tbl in [self.pg_tables[i]['table_name'] for i in range(len(self.pg_tables))]:
+        if tbl in self.pg_tables:
             self.write2display(f"Tabela {tbl} já existe no schema {self.schema}, substituindo...")
             cur.execute(f"DROP TABLE {self.schema}.{tbl} CASCADE")
         self.write2display(f"Carregando {df['data'].count()} colunas da tabela {tbl}...")
@@ -303,7 +290,12 @@ class Oracle2PostgresETL(ETL_session_UI):
             cur.execute(f"ALTER TABLE {self.schema}.{tbl} ADD PRIMARY KEY {pk_columns}")
             if df['auto']:
                 last_val = df['data'].agg({df['auto']: 'max'}).collect()[0]
-                cur.execute(f'''CREATE SEQUENCE IF NOT EXISTS {tbl}_{df['auto'].lower()}_seq START WITH {int(last_val[f"max({df['auto']})"])}''')
+                cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class AS cls \
+                            ON seq.seqrelid = cls.oid AND cls.relname = '{tbl}_{df['auto'].lower()}_seq'")
+                res = cur.fetchall()
+                if len(res):
+                    cur.execute(f"DROP SEQUENCE {tbl}_{df['auto'].lower()}_seq")
+                cur.execute(f'''CREATE SEQUENCE {tbl}_{df['auto'].lower()}_seq START WITH {int(last_val[f"max({df['auto']})"])}''')
                 cur.execute(f'''ALTER TABLE {self.schema}.{tbl} ALTER COLUMN "{df['auto'].lower()}" SET DEFAULT nextval('{tbl}_{df['auto'].lower()}_seq')''')
                 cur.execute(f"ALTER SEQUENCE {tbl}_{df['auto'].lower()}_seq OWNER TO {self.user}")
         except Exception as e:
@@ -325,8 +317,7 @@ class Oracle2PostgresETL(ETL_session_UI):
         try:
             column_count = self.execute_spark_query('pg', f'SELECT count(*) FROM {self.schema}.{tbl}')
             if column_count[0]['count'] != df['data'].count():
-                print(column_count[0]['count'], df['data'].count())
-                self.write2display(f'Detectada inconsistencia na tabela {tbl}, tente migra-la novamente!')
+                self.write2display(f'Detectada inconsistencia no número de colunas da tabela {tbl}, tente migra-la novamente!')
                 return 'failed'
             cur.execute(f"SELECT con.conname \
                         FROM pg_catalog.pg_constraint con \
@@ -374,12 +365,28 @@ class Oracle2PostgresETL(ETL_session_UI):
         name = data[0]
         type = data[1]
         self.write2display(f'Extraindo {type} {name}')
+        if type == 'SEQUENCE':
+            # Sequencias não precisam de tradução, então já a adiciona imediatamente
+            cur = self.oracle_conn.cursor()
+            cur.execute(f"select last_number, increment_by from all_sequences where sequence_owner = '{self.user}' and sequence_name = '{name}'")
+            res = cur.fetchall()
+            last_val = res[0][0]
+            increment = res[0][1]
+            cur.close()
+            cur = self.pg_conn.cursor()
+            cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class AS cls \
+                ON seq.seqrelid = cls.oid AND cls.relname = '{name.lower()}'")
+            res = cur.fetchall()
+            if len(res):
+                cur.execute(f"DROP SEQUENCE {name.lower()}")
+            cur.execute(f"CREATE SEQUENCE {name.lower()} INCREMENT BY {increment} START WITH {last_val}")
+            return ['done', data, None]
         if type == 'VIEW':
             query = f"SELECT text FROM all_views WHERE owner = '{self.user}' AND view_name = '{name}'"
         else:
             query = f"SELECT text, line FROM all_source WHERE owner = '{self.user}' AND name = '{name}' ORDER BY line"
         source = self.execute_spark_query('ora', query)
-        query = f"SELECT referenced_name, referenced_type FROM all_dependencies WHERE owner = '{self.user}' AND name = '{name}' AND (referenced_type = 'PROCEDURE' OR referenced_type = 'FUNCTION' OR referenced_type = 'VIEW')"
+        query = f"SELECT referenced_name, referenced_type FROM all_dependencies WHERE owner = '{self.user}' AND name = '{name}' AND referenced_type in ('PROCEDURE', 'FUNCTION', 'VIEW')"
         dependencies = self.execute_spark_query('ora', query)
         if type == 'VIEW':
             source_body = [f"{self.normalize_name(name)} AS {source[0]['TEXT']}"]
@@ -451,6 +458,9 @@ class Oracle2PostgresETL(ETL_session_UI):
             if '.' in tokens[i]:
                 tokens[i] = tokens[i].replace(':new', 'NEW')
                 tokens[i] = tokens[i].replace(':old', 'OLD')
+                if 'nextval' in tokens[i]:
+                    aux = tokens[i].split('.')
+                    tokens[i] = f"nextval('{aux[0]}')"
             if 'number' in tokens[i].lower():
                 tokens[i] = tokens[i].lower().replace('number', 'numeric')
             if 'varchar2' in tokens[i].lower():
@@ -879,9 +889,11 @@ class Postgres2OracleETL(ETL_session_UI):
                 pass
             query = f'''SELECT table_name FROM all_users WHERE owner = '{self.schema}' AND tablespace_name not like 'SYS%' '''
             self.ora_tables = self.execute_spark_query('ora', query)
+            self.ora_tables = [self.ora_tables[i]['TABLE_NAME'] for i in range(len(self.ora_tables))]
             query = f"SELECT name, type FROM all_source WHERE owner = '{self.schema}' AND line = 1 \
                     UNION SELECT view_name, 'VIEW' FROM all_views WHERE owner = '{self.schema}'"
             self.ora_sources = self.execute_spark_query('ora', query)
+            self.ora_sources = [[self.ora_sources[i]['NAME'], self.ora_sources[i]['TYPE']] for i in range(len(self.ora_sources))]
             # Executa extração de cada tabela/source em threads assincronas
             # O número no método define quantos objetos serão extraídos simultaneamente
             # Aumentar este valor fará o processo mais rápido mas poderá causar instabilidades
@@ -984,30 +996,17 @@ class Postgres2OracleETL(ETL_session_UI):
                 ref = self.execute_spark_query('pg', ref_query)
                 ref_columns = [ref[i]['column_name'] for i in range(len(ref))]
                 table_data['fk'][constraint] = {'src_schema': table_schema, 'src_table': table_name, 'src_column': columns, 'ref_schema': ref[0]['table_schema'], 'ref_table': ref[0]['table_name'], 'ref_column': ref_columns, 'on_delete': ref[0]['delete_rule']}
-        # Coleta as dependencias da tabela
-        dp_query = f"select name, type, referenced_name, referenced_type from all_dependencies where name in (select name from all_dependencies where referenced_name = '{table_name}')"
-        dependencies = self.execute_spark_query('ora', dp_query)
         # Coleta as informações especificas às colunas
-        tab_query = f"select column_name, data_type, data_default from all_tab_columns where table_name = '{table_name}'"
-        cdata = self.execute_spark_query('ora', tab_query)
+        tab_query = f"SELECT * FROM information_schema.columns WHERE table_schema = '{table_schema}' AND table_name = '{table_name}'"
+        cdata = self.execute_spark_query('pg', tab_query)
         # Identifica e classifica as dependencias
-        for dep in dependencies:
-            # Chaves primarias com auto incremento definida com trigger
-            if dep['TYPE'] == 'TRIGGER' and dep['REFERENCED_TYPE'] == 'SEQUENCE':
-                if len(pk) == 1:
-                    table_data['auto'] = pk[0]
-                else:
-                    query = f"select column_name from all_triggers where trigger_name = '{dep['NAME']}'"
-                    column = self.execute_spark_query('ora', query)
-                    if column[0]:
-                        table_data['auto'] = column[0]
-                table_data['seq'] = dep['REFERENCED_NAME']
         for column in cdata:
             # Chave primaria com auto incremento definida com IDENTITY
-            if column['DATA_DEFAULT']:
-                table_data['auto'] = pk[pk.index(column['COLUMN_NAME'])]
-                table_data['seq'] = column['DATA_DEFAULT'].split('.')[1]
-        if table_name in self.pg_tables:
+            if column['column_default']:
+                table_data['auto'] = pk[pk.index(column['column_name'])]
+                table_data['seq'] = column['column_default'][column['column_default'].index('\''):]
+                table_data['seq'] = table_data['seq'][:table_data['seq'].index('\'')]
+        if table_name in self.ora_tables:
             self.write2display(f'{table_name} já existe no postgres, substituindo...')
         if fk:
             for value in table_data['fk'].values():
@@ -1018,3 +1017,38 @@ class Postgres2OracleETL(ETL_session_UI):
         self.write2display(f"Extração concluída na tabela {table_name}")
         res = self.load_table(table_data, table_name.lower())
         return [res, table_name, None]
+
+    # Carrega dados de uma tabela para a base de dados alvo
+    def load_table(self, df, tbl):
+        # Estabelece conexão genérica
+        cur = self.oracle_conn.cursor()
+        if tbl in self.ora_tables:
+            self.write2display(f"Tabela {tbl} já existe no schema {self.schema}, substituindo...")
+            cur.execute(f"DROP TABLE {self.schema}.{tbl} CASCADE")
+        self.write2display(f"Carregando {df['data'].count()} colunas da tabela {tbl}...")
+        try:
+            # Carrega a informação extraida sem dependencias ou constraints
+            df['data'].repartition(5).write.mode('overwrite').format('jdbc').options(url=self.ora_url, user=self.ora_user, password=self.ora_password, driver=self.ora_driver, dbtable=f'{self.schema}.{tbl}', batch=1000000).save()
+            self.write2display(f'Carregando dependencias da tabela {tbl}...')
+            # Adiciona dependencia de chave primária
+            pk_columns = self.list2str(df['pk'])
+            cur.execute(f"ALTER TABLE {self.schema}.{tbl} ADD CONSTRAINT PRIMARY KEY {pk_columns}")
+            if df['auto']:
+                last_val = df['data'].agg({df['auto']: 'max'}).collect()[0]
+                cur.execute(f"SELECT sequence_name FROM all_sequences WHERE sequence_name = '{tbl.upper()}_{df['auto'].upper()}_seq'")
+                res = cur.fetchall()
+                if len(res):
+                    cur.execute(f"DROP SEQUENCE {tbl.upper()}_{df['auto'].upper()}_seq")
+                cur.execute(f'''CREATE SEQUENCE {tbl.upper()}_{df['auto'].upper()}_seq START WITH {int(last_val[f"max({df['auto']})"])}''')
+                cur.execute(f'''ALTER TABLE {self.schema}.{tbl} MODIFY "{df['auto'].upper()}" DEFAULT {tbl}_{df['auto'].lower()}_seq.nextval ''')
+        except Exception as e:
+            self.write2display(f"Carregamento da tabela {tbl} falhou!\nObjetos dependentes não serão migrados!")
+            print(e)
+            return 'failed'
+        # Adiciona dependencias de chaves estrangeiras
+        if df['fk']:
+            for key, value in df['fk'].items():
+                cur.execute(f"ALTER TABLE {self.schema}.{value['src_table'].upper()} ADD CONSTRAINT {key} FOREIGN KEY {self.list2str(value['src_column'])} REFERENCES {self.schema}.{value['ref_table'].lower()} {self.list2str(value['ref_column'])} ON DELETE {value['on_delete']}")
+        self.write2display(f"{df['data'].count()} colunas importadas da tabela {tbl} para postgres!")
+        cur.close()
+        return self.test_table(df, tbl)

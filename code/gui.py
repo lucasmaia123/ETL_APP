@@ -841,7 +841,7 @@ class Oracle2Postgres(tk.Toplevel):
             # Detecta dependencias entre procedimentos
             for src in selected_sources:
                 query = f"SELECT DISTINCT referenced_name, referenced_type, referenced_owner FROM all_dependencies WHERE name = '{src[0]}' \
-                    AND referenced_type not in ('SEQUENCE', 'PACKAGE') AND referenced_owner != 'PUBLIC' AND referenced_owner not like '%SYS%'"
+                    AND referenced_type not in ('PACKAGE') AND referenced_owner != 'PUBLIC' AND referenced_owner not like '%SYS%'"
                 dependencies = self.execute_spark_query('ora', query)
                 # Checa se objeto o qual depende pertence a um schema que não é o usuário
                 for i in range(len(dependencies)):
@@ -856,11 +856,13 @@ class Oracle2Postgres(tk.Toplevel):
                         outer_refs[-1].append(r_name)
                         outer_refs[-1].append(r_type)
                 dependencies = [[dependencies[i]['REFERENCED_NAME'], dependencies[i]['REFERENCED_TYPE']] for i in range(len(dependencies))]
-                # Detecta se procedimento depende de alguma tabela
+                # Detecta se procedimento depende de algum objeto
                 for dep in dependencies:
                     if dep[1] == 'TABLE':
                         if dep[0] not in tables:
                             dep_tables.add(dep[0])
+                    elif dep[1] == 'SEQUENCE' and dep not in selected_sources:
+                        selected_sources.append(dep)
                     elif dep not in selected_sources:
                         dep_sources.add(tuple(dep))
             dep_sources = list(dep_sources)
@@ -885,7 +887,7 @@ class Oracle2Postgres(tk.Toplevel):
             sel_tables.append(table)
         for src in dep_sources:
             textBox.insert(tk.END, f'{src[0]}   {src[1]}\n')
-            sel_sources.append(src)
+            sel_sources.append(list(src))
         textBox.config(state='disabled')
         if len(outer_references) > 0:
             ttk.Label(window, text='Alguns objetos referenciam objetos em diferentes schemas\nEstes serão removidos e listados no arquivo para migração manual').pack(padx=10, pady=10)
@@ -1346,7 +1348,7 @@ class Postgres2Oracle(tk.Toplevel):
                             JOIN pg_namespace n ON n.oid = p.pronamespace \
                             WHERE n.nspname = '{src[0]}' and p.proname = '{src[1]}' \
                             UNION SELECT definition FROM pg_views \
-                            WHERE schemaname = 'public' AND viewname = 'car_owner') as body \
+                            WHERE schemaname = '{src[0]}' AND viewname = '{src[1]}') as body \
                             ON position(CASE WHEN names.schema != 'public' THEN COALESCE(names.schema || '.' || names.name, '') \
                             ELSE names.name END in body.func_def) > 0"
                     dependencies = self.execute_spark_query('pg', query)
@@ -1366,6 +1368,25 @@ class Postgres2Oracle(tk.Toplevel):
                     for tab in trig_dep:
                         if tab not in tables:
                             dep_tables.add(tab)
+                    # Checa se existe alguma sequencia referenciada pela função do trigger
+                    query = f"SELECT cls.relname, ns.nspname FROM pg_class cls JOIN pg_namespace AS ns \
+                            ON cls.relnamespace = ns.oid WHERE cls.relname IN \
+                            (SELECT relname FROM \
+                            (SELECT cls.relname FROM pg_sequence seq JOIN pg_class AS cls \
+                            ON seq.seqrelid = cls.oid JOIN pg_namespace AS ns \
+                            ON cls.relnamespace = ns.oid WHERE ns.nspname = '{src[0]}') AS names \
+                            JOIN \
+                            (SELECT pg_get_functiondef(proc.oid) AS func_def FROM pg_proc proc \
+                            JOIN pg_namespace AS ns ON ns.oid = proc.pronamespace \
+                            WHERE ns.nspname = '{src[0]}' AND proc.proname IN ( \
+                            SELECT pr.proname FROM pg_trigger tgr JOIN pg_proc AS pr \
+                            ON tgr.tgfoid = pr.oid WHERE tgr.tgname = '{src[1]}' \
+                            )) AS body \
+                            ON position(names.relname IN body.func_def) > 0)"
+                    seq_dep = self.execute_spark_query('pg', query)
+                    seq_dep = [[seq_dep[i]['nspname'], seq_dep[i]['relname']] for i in range(len(seq_dep))]
+                    for seq in seq_dep:
+                        sources.append([seq[0], seq[1], 'SEQUENCE'])
             dep_sources = list(dep_sources)
             dep_tables = list(dep_tables)
         if len(dep_tables) > 0 or len(dep_sources) > 0:
