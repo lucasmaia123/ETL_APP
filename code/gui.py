@@ -245,6 +245,7 @@ class etl_UI(tk.Frame):
             log_file.write(data)
             log_file.close()
 
+# Classe para preparação do ETL de Oracle para Postgres
 class Oracle2Postgres(tk.Toplevel):
     
     def __init__(self, master, conn_session):
@@ -258,6 +259,7 @@ class Oracle2Postgres(tk.Toplevel):
             if key[0] != '_' and key not in self_refs:
                 exec(f'self.{key} = master.{key}')
         self.master = master
+        self.full_backup = False
         self.write2log(f'Iniciando sessão {self.__hash__()} de Oracle {self.ora_url} para Postgres {self.pg_url}')
         if self.ora_dba:
             self.draw_schema_selection_window()
@@ -282,10 +284,14 @@ class Oracle2Postgres(tk.Toplevel):
     # Cria um backup de um schema Postgres antes de realizar o ETL.
     # Considere modificar essa função para fazer backup apenas das tabelas migradas
     # caso esteja demorando muito para criar o backup de todo o schema
-    def create_backup(self, schema):
+    def create_backup(self, schema=None):
         try:
-            BACKUP_FILE = os.path.join(APP_HOME, f'backups/{schema}_backup.dmp')
-            command = f"pg_dump --no-password -h {self.pg_host} -p {self.pg_port} -d {self.pg_database} -U {self.pg_user} -n {schema} -Fc -f {BACKUP_FILE}"
+            if schema:
+                BACKUP_FILE = os.path.join(APP_HOME, f'backups/{schema}_backup.dmp')
+                command = f"pg_dump --no-password -h {self.pg_host} -p {self.pg_port} -d {self.pg_database} -U {self.pg_user} -n {schema} -Fc -f {BACKUP_FILE}"
+            else:
+                BACKUP_FILE = os.path.join(APP_HOME, f'backups/{self.__hash__()}_database_backup.dmp')
+                command = f"pg_dump --no-password -h {self.pg_host} -p {self.pg_port} -d {self.pg_database} -U {self.pg_user} -Fc -f {BACKUP_FILE}"
             p = Popen(command, shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, env={'PGPASSWORD': self.pg_password})
             p.wait()
             return True
@@ -301,16 +307,22 @@ class Oracle2Postgres(tk.Toplevel):
             return var.get()
     
     # Restora ao estado antes do ETL
-    def restore_from_backup(self, schema):
-        BACKUP_FILE = os.path.join(APP_HOME, f'backups/{schema}_backup.dmp')
+    def restore_from_backup(self, schema=None):
+        if schema:
+            BACKUP_FILE = os.path.join(APP_HOME, f'backups/{schema}_backup.dmp')
+        else:
+            BACKUP_FILE = os.path.join(APP_HOME, f'backups/{self.__hash__()}_database_backup.dmp')
         command = f"pg_restore --no-password -h {self.pg_host} -p {self.pg_port} -d {self.pg_database} -U {self.pg_user} {BACKUP_FILE}"
         command = shlex.split(command)
         p = Popen(command, shell=False, stdin=PIPE, stdout=PIPE, stderr=PIPE, env={'PG_PASSWORD': self.pg_password})
         p.wait()
 
     # Deleta arquivo de backup
-    def remove_backup(self, schema):
-        BACKUP_FILE = os.path.join(APP_HOME, f'backups/{schema}_backup.dmp')
+    def remove_backup(self, schema=None):
+        if schema:
+            BACKUP_FILE = os.path.join(APP_HOME, f'backups/{schema}_backup.dmp')
+        else:
+            BACKUP_FILE = os.path.join(APP_HOME, f'backups/{self.__hash__()}_database_backup.dmp')
         try:
             os.remove(BACKUP_FILE)
         except:
@@ -374,7 +386,7 @@ class Oracle2Postgres(tk.Toplevel):
                 if schema.lower() in self.pg_users:
                     self.user_exists(schema)
                 else:
-                    self.migrate_user_window(schema)
+                    self.migrate_user_window(schema, True)
             elif self.migration_mode.get() == 2:
                 if schema.lower() in self.pg_schemas:
                     self.schema_exists(schema)
@@ -389,23 +401,30 @@ class Oracle2Postgres(tk.Toplevel):
     # Pede permissão para deletar schema caso já exista
     def schema_exists(self, schema):
         window = tk.Toplevel(self)
-        ttk.Label(window, text=f'O schema {schema} já existe na base de dados\nDeseja substituilo?').pack(padx=20, pady=20)
+        ttk.Label(window, text=f'O schema {schema.lower()} já existe na base de dados\nDeseja substituilo?').pack(padx=20, pady=20)
         ttk.Button(window, text='Sim', command=lambda:[self.migrate_schema(schema), window.destroy()]).pack(side='right', padx=20, pady=10)
         ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=10)
 
     # Coleta objetos do schema a ser migrado e cria novo schema
     def migrate_schema(self, schema):
+        window = tk.Toplevel(self)
+        ttk.Label(window, text='Criando backup da base de dados...').pack(padx=20, pady=20)
+        ttk.Button(window, text='Cancelar', command=self.close).pack(padx=10, pady=10)
+        self.create_backup()
+        window.destroy()
+        
         cur = self.pg_conn.cursor()
-        cur.execute(f'DROP SCHEMA IF EXISTS {schema} CASCADE')
-        cur.execute(f'CREATE SCHEMA {schema}')
+        cur.execute(f'DROP SCHEMA IF EXISTS {schema.lower()} CASCADE')
+        cur.execute(f'CREATE SCHEMA {schema.lower()}')
         cur.close()
         self.pg_schema = schema.lower()
-        query = f"SELECT table_name FROM all_tables WHERE owner = '{schema.upper()}'"
+        query = f"SELECT table_name FROM all_tables WHERE owner = '{schema}'"
         tables = self.execute_spark_query('ora', query)
-        tables = [tables[i]['TABLE_NAME'] for i in range(len(tables))]
-        query = f"SELECT name, type FROM all_source where owner = '{schema.upper()}' AND line = 1 UNION SELECT view_name, 'VIEW' FROM all_views where owner = '{schema.upper()}'"
+        tables = [[schema, tables[i]['TABLE_NAME']] for i in range(len(tables))]
+        query = f"SELECT name, type FROM all_source where owner = '{schema}' AND line = 1 UNION SELECT view_name, 'VIEW' FROM all_views where owner = '{schema.upper()}'"
         sources = self.execute_spark_query('ora', query)
-        sources = [[sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
+        sources = [[schema, sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
+        self.full_backup = True
         self.etl_initialization(tables, sources)
 
     # Pergunta o que fazer quando usuário já existe
@@ -417,22 +436,27 @@ class Oracle2Postgres(tk.Toplevel):
         ttk.Button(window, text='Manter e prosseguir', command=lambda:[self.migrate_user_window(user, False), window.destroy()]).pack(side='left', padx=20, pady=10)
 
     # GUI para pegar configurações do novo usuário
-    def migrate_user_window(self, user, delete=True):
+    def migrate_user_window(self, user, new_user=True):
         window = tk.Toplevel(self)
-        if delete:
+        if new_user:
             ttk.Label(window, text=f'Digite uma senha para o novo usuário {user}:').pack(padx=10, pady=10)
         else:
             ttk.Label(window, text=f'Digite a senha do usuário {user}:').pack(padx=10, pady=10)
         password_entry = ttk.Entry(window, width=30)
         password_entry.pack(padx=10, pady=10)
+        superuser = tk.BooleanVar()
+        superuser.set(False)
+        if new_user:
+            su_cb = ttk.Checkbutton(window, text='Criar usuário como superuser', variable=superuser, onvalue=True, offvalue=False)
+            su_cb.pack(padx=20, pady=10)
         create_db = tk.BooleanVar()
         c1 = ttk.Checkbutton(window, text='Migrar usuário para a base de dados conectada', variable=create_db, onvalue=False)
-        c1.pack()
+        c1.pack(padx=10, pady=10)
         c2 = ttk.Checkbutton(window, text='Criar nova base de dados', variable=create_db, onvalue=True)
-        c2.pack()
+        c2.pack(padx=10)
         c1.invoke()
         ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=10)
-        ttk.Button(window, text='Prosseguir', command=lambda:self.migrate_user(user, password_entry.get(), create_db.get(), delete, window)).pack(side='right', padx=20, pady=10)
+        ttk.Button(window, text='Prosseguir', command=lambda:self.migrate_user(user, password_entry.get(), create_db.get(), superuser.get(), new_user, window)).pack(side='right', padx=20, pady=10)
 
     # Lista objetos que pertencem a um usuário a ser deletado
     def delete_user(self, user):
@@ -458,7 +482,9 @@ class Oracle2Postgres(tk.Toplevel):
                 and rol.rolname = '{user.lower()}' \
             order by nsp.nspname, cls.relname"
         objects = self.execute_spark_query('pg', query)
-        if len(objects) == 0:
+        query = f"select datname from pg_database as db join pg_roles as role on db.datdba = role.oid where role.rolname = '{user.lower()}'"
+        dbs = self.execute_spark_query('pg', query)
+        if len(objects) == 0 and len(dbs) == 0:
             self.migrate_user_window(user, True)
         else:
             window = tk.Toplevel(self)
@@ -469,17 +495,24 @@ class Oracle2Postgres(tk.Toplevel):
             scrollBar.pack(side='right', fill='y')
             textBox = tk.Text(box_frame, yscrollcommand=scrollBar.set, state='normal', height=10)
             textBox.pack(pady=10)
-            textBox.insert(tk.END, 'Schema    Nome    Tipo')
-            textBox.insert(tk.END, '-' * 30)
-            for object in objects:
-                textBox.insert(tk.END, f"{object['schemaname']}    {object['objectname']}   {object['objecttype']}\n")
+            if len(objects):
+                textBox.insert(tk.END, 'Schema    Nome    Tipo\n')
+                textBox.insert(tk.END, '-' * 30 + '\n')
+                for object in objects:
+                    textBox.insert(tk.END, f"{object['schemaname']}    {object['objectname']}   {object['objecttype']}\n")
+            textBox.insert(tk.END, '-' * 30 + '\n')
+            if len(dbs):
+                textBox.insert(tk.END, 'Base de dados\n')
+                textBox.insert(tk.END, '-' * 30 + '\n')
+                for db in dbs:
+                    textBox.insert(tk.END, db['datname'] + '\n')
             textBox.config(state='disabled')
             ttk.Label(window, text='Você tem certeza que deseja prosseguir?').pack(padx=10, pady=10)
             ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=10)
-            ttk.Button(window, text='Sim', command=lambda:[self.migrate_user_window(user, delete=True), window.destroy()]).pack(side='right', padx=20, pady=10)
+            ttk.Button(window, text='Sim', command=lambda:[self.migrate_user_window(user, True), window.destroy()]).pack(side='right', padx=20, pady=10)
 
     # Executa a migração de usuário
-    def migrate_user(self, user, password, create_db=False, new_user=True, window=None):
+    def migrate_user(self, user, password, create_db=False, superuser = False, new_user=True, window=None):
         if not user or not password:
             return
         # Checa se a senha fornecida está correta quando mantendo um usuário já existente
@@ -504,11 +537,16 @@ class Oracle2Postgres(tk.Toplevel):
             if priv[0] == 'false':
                 self.message_window(f'Usuário {self.pg_user} não tem permissão para criar banco de dados!')
                 return
+            
+        window = tk.Toplevel(self)
+        ttk.Label(window, text='Criando backup da base de dados...').pack(padx=20, pady=20)
+        ttk.Button(window, text='Cancelar', command=self.close).pack(padx=10, pady=10)
+        self.create_backup()
+        window.destroy()
 
         if new_user:
             if user.lower() in self.pg_users:
                 # Deleta objetos e databases pertencentes ao usuário
-                cur.execute(f'DROP OWNED BY {user} CASCADE')
                 query = f"select datname from pg_database as db join pg_roles as role on db.datdba = role.oid where role.rolname = '{user}'"
                 dbs = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query=query).load().collect()
                 for db in [dbs[i]['datname'] for i in range(len(dbs))]:
@@ -517,14 +555,10 @@ class Oracle2Postgres(tk.Toplevel):
                     except:
                         self.message_window(f'Database {db} tem sessões abertas, feche todas as sessões e tente novamente')
                         return
+                cur.execute(f'DROP OWNED BY {user} CASCADE')
                 cur.execute(f'DROP USER IF EXISTS {user}')
 
-            # Checa se usuário é DBA
-            query = f"SELECT granted_role FROM dba_role_privs WHERE grantee = '{user.upper()}'"
-            privs = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
-            privs = [privs[i]['GRANTED_ROLE'] for i in range(len(privs))]
-            if 'DBA' in privs:
-                # Caso usuário oracle seja dba, cria um superuser em postgres
+            if superuser:
                 cur.execute(f"CREATE USER {user} WITH SUPERUSER PASSWORD '{password}'")
             else:
                 cur.execute(f"CREATE USER {user} WITH PASSWORD '{password}'")
@@ -532,10 +566,10 @@ class Oracle2Postgres(tk.Toplevel):
         # Migra todas as tabelas e procedures relacionadas ao usuário
         query = f"SELECT table_name FROM all_tables WHERE owner = '{user.upper()}'"
         tables = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
-        tables = [tables[i]['TABLE_NAME'] for i in range(len(tables))]
+        tables = [[user.upper(), tables[i]['TABLE_NAME']] for i in range(len(tables))]
         query = f"SELECT name, type FROM all_source where owner = '{user.upper()}' AND line = 1 UNION SELECT view_name, 'VIEW' FROM all_views where owner = '{user.upper()}'"
         sources = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
-        sources = [[sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
+        sources = [[user.upper(), sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
 
         # Cria nova base de dados com o nome do usuário
         # Migrar usuário 'exemplo' criará o db 'exemplo' com o único schema 'public' e dará todas as permissões para o usuário 'exemplo' no db 'exemplo'
@@ -565,13 +599,13 @@ class Oracle2Postgres(tk.Toplevel):
             pg_schemas = [pg_schemas[i]['nspname'] for i in range(len(pg_schemas))]
             if user not in pg_schemas:
                 cur.execute(f'CREATE SCHEMA {user}')
+                self.write2log(f'Criado schema {user} no database {self.pg_database}')
             cur.execute(f'GRANT USAGE ON SCHEMA {user} TO {user}')
             cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA {user} GRANT ALL PRIVILEGES ON TABLES TO {user}')
             cur.execute(f'ALTER SCHEMA {user} OWNER TO {user}')
-            self.write2log(f'Criado schema {user} no database {self.pg_database}')
             self.pg_schema = user
             cur.close()
-        self.no_backup = True
+        self.full_backup = True
         self.etl_initialization(tables, sources)
 
     # Lista as tabelas disponiveis com a conexão estabelecida e permite o usuário escolher quais tabelas serão migradas
@@ -669,10 +703,10 @@ class Oracle2Postgres(tk.Toplevel):
         # Se o schema existir, checa se o usuário tem permissão para criar tabelas
         elif not self.pg_superuser:
             query = f"SELECT usename AS grantee, nspname, privilege_type \
-                        FROM pg_namespace, aclexplode(nspacl) a \
-                        JOIN pg_user e \
-                        ON a.grantee = e.usesysid \
-                        WHERE e.usename = '{self.pg_user}' and nspname = '{self.pg_schema}'"
+                    FROM pg_namespace, aclexplode(nspacl) a \
+                    JOIN pg_user e \
+                    ON a.grantee = e.usesysid \
+                    WHERE e.usename = '{self.pg_user}' and nspname = '{self.pg_schema}'"
             perm = self.execute_spark_query('pg', query)
             perm = [perm[i]['privilege_type'] for i in range(len(perm))]
             if 'CREATE' not in perm:
@@ -681,13 +715,14 @@ class Oracle2Postgres(tk.Toplevel):
                 self.write2log('Migração cancelada por falta de permissões')
                 self.destroy()
                 return
+        # Coleta tabelas existentes no schema alvo
         query = f'''SELECT table_name FROM information_schema.tables WHERE table_schema = '{self.pg_schema}' '''
         pg_tables = self.execute_spark_query('pg', query)
         pg_tables = [pg_tables[i]['table_name'] for i in range(len(pg_tables))]
         for i in table_listbox.curselection():
-            tables.append(table_listbox.get(i))
+            tables.append([self.user, table_listbox.get(i)])
         for table in tables:
-            if table.lower() in pg_tables:
+            if table[1].lower() in pg_tables:
                 existing_tables.append(table)
         if len(existing_tables) > 0:
             window = tk.Toplevel(self)
@@ -703,7 +738,7 @@ class Oracle2Postgres(tk.Toplevel):
             listbox.pack(padx=10, pady=10, expand=True, fill='both')
 
             for table in existing_tables:
-                listbox.insert(tk.END, table)
+                listbox.insert(tk.END, table[1])
 
             listbox_scrollBar.config(command=listbox.yview)
 
@@ -723,8 +758,8 @@ class Oracle2Postgres(tk.Toplevel):
         aux_table = deepcopy(tables)
         for table in aux_table:
             # Se tabela já existe e não está marcada para substituição, remove da migração
-            if table.lower() in pg_tables and table not in override_tables:
-                tables.remove(table)
+            if table[1].lower() in pg_tables and table[1] not in override_tables:
+                tables.remove([self.user, table])
         self.source_selection_window(tables, s_mode)
 
     # Idem com seleção de tabelas, mas agora para procedimentos guardados
@@ -745,19 +780,19 @@ class Oracle2Postgres(tk.Toplevel):
             # Migra procedimentos relacionados
             if s_mode.get() == 0:
                 for table in tables:
-                    query = f"SELECT DISTINCT name, type FROM all_dependencies WHERE referenced_name = '{table}' AND owner = '{self.user}'"
+                    query = f"SELECT DISTINCT owner, name, type FROM all_dependencies WHERE referenced_name = '{table[1]}' AND owner = '{self.user}'"
                     sources = self.execute_spark_query('ora', query)
-                    sources = [[sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
+                    sources = [[sources[i]['OWNER'], sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
                 for source in sources:
-                    textbox.insert(tk.END, f'{source[0]}    {source[1]}\n')
+                    textbox.insert(tk.END, f'{source[0]}.{source[1]}    {source[2]}\n')
             
             # Migra todos os procedimentos
             elif s_mode.get() == 1:
-                query = f"SELECT DISTINCT name, type FROM all_dependencies WHERE owner = '{self.user}'"
+                query = f"SELECT DISTINCT owner, name, type FROM all_dependencies WHERE owner = '{self.user}'"
                 sources = self.execute_spark_query('ora', query)
-                sources = [[sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
+                sources = [[sources[i]['OWNER'], sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
                 for source in sources:
-                    textbox.insert(tk.END, str(source) + '\n')
+                    textbox.insert(tk.END, f'{source[0]}.{source[1]}    {source[2]}\n')
 
             if len(sources) == 0:
                 window.destroy()
@@ -777,7 +812,7 @@ class Oracle2Postgres(tk.Toplevel):
             window.geometry('600x400')
             query = f"SELECT name, type FROM all_source where owner = '{self.user}' AND line = 1 UNION SELECT view_name, 'VIEW' FROM all_views where owner = '{self.user}'"
             sources = self.execute_spark_query('ora', query)
-            sources = [[sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
+            sources = [[self.user, sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
 
             ttk.Label(window, text='Procedimentos disponiveis para migração\nSelecione quais deseja migrar:').pack(padx=20, pady=10)
             source_frame = ttk.Frame(window, height=300)
@@ -790,7 +825,7 @@ class Oracle2Postgres(tk.Toplevel):
             source_listbox.pack(expand=True, fill='both')
 
             for src in sources:
-                source_listbox.insert(tk.END, f"{src[0]} {src[1]}")
+                source_listbox.insert(tk.END, f"{src[0]}.{src[1]}   {src[2]}")
 
             source_scrollBar.config(command=source_listbox.yview)
 
@@ -799,8 +834,8 @@ class Oracle2Postgres(tk.Toplevel):
             ttk.Button(lower_frame, text='Cancelar', command=lambda: window.destroy()).pack(side='left', padx=20, pady=10)
             ttk.Button(lower_frame, text='Prosseguir', command=lambda: [self.etl_initialization(tables, source_listbox), window.destroy()]).pack(side='right', padx=20, pady=10)
 
-    # Coleta os nomes dos objetos selecionados pelo usuário para iniciar a migração
-    def etl_initialization(self, tables, sources, outer_refs=[]):
+    # Coleta os nomes dos objetos selecionados pelo usuário e detecta dependencias
+    def etl_initialization(self, tables, sources):
         if len(tables) == 0 and type(sources) != list:
             if len(sources.curselection()) == 0:
                 window = tk.Toplevel(self)
@@ -816,23 +851,31 @@ class Oracle2Postgres(tk.Toplevel):
             selected_sources = []
             for i in sources.curselection():
                 split_src = sources.get(i).split()
-                selected_sources.append([split_src[0], split_src[1]])
+                src_type = split_src[1]
+                split_src = split_src[0].split('.')
+                selected_sources.append([split_src[0], split_src[1], src_type])
         else:
             selected_sources = sources
         dep_tables = set()
         # Detecta dependencias entre tabelas
         for table in tables:
             query = f"SELECT DISTINCT table_name, owner FROM all_cons_columns WHERE constraint_name in \
-            (select r_constraint_name from all_constraints where constraint_type = 'R' and table_name = '{table}')"
+            (SELECT r_constraint_name FROM all_constraints WHERE constraint_type = 'R' AND table_name = '{table[1]}' AND owner = '{table[0]}')"
             r_tables = self.execute_spark_query('ora', query)
             for i in range(len(r_tables)):
                 r_owner = r_tables[i]['OWNER']
                 r_name = r_tables[i]['TABLE_NAME']
-                # checa se tabela a qual depende pertence a um schema que não é o usuário
+                # Checa se o usuário tem acesso a uma tabela que não o pertence
                 if r_owner != self.user.upper():
-                    r_tables.remove(r_tables[i])
-                    outer_refs.append([tables.pop(tables.index(table)), 'TABELA', r_owner, r_name, 'TABELA'])
-            r_tables = [r_tables[i]['TABLE_NAME'] for i in range(len(r_tables))]
+                    try:
+                        query = f"SELECT * FROM {r_owner}.{r_name} WHERE rownum = 1"
+                        res = self.execute_spark_query('ora', query)
+                        if len(res) == 0:
+                            raise Exception
+                    except:
+                        self.message_window(f'Usuário {self.user} Não tem acesso à tabela {r_owner}.{r_name}, migração cancelada!')
+                        return
+            r_tables = [[r_tables[i]['OWNER'], r_tables[i]['TABLE_NAME']] for i in range(len(r_tables))]
             for tab in r_tables:
                 if tab not in tables:
                     dep_tables.add(tab)
@@ -840,40 +883,46 @@ class Oracle2Postgres(tk.Toplevel):
         if sources:
             # Detecta dependencias entre procedimentos
             for src in selected_sources:
-                query = f"SELECT DISTINCT referenced_name, referenced_type, referenced_owner FROM all_dependencies WHERE name = '{src[0]}' \
-                    AND referenced_type not in ('PACKAGE') AND referenced_owner != 'PUBLIC' AND referenced_owner not like '%SYS%'"
+                query = f"SELECT DISTINCT referenced_name, referenced_type, referenced_owner FROM all_dependencies WHERE name = '{src[1]}' \
+                        AND owner = '{src[0]}' AND referenced_type not in ('PACKAGE') AND referenced_owner != 'PUBLIC' AND referenced_owner not like '%SYS%'"
                 dependencies = self.execute_spark_query('ora', query)
-                # Checa se objeto o qual depende pertence a um schema que não é o usuário
+                # Checa se o usuário tem acesso a um objeto que não o pertence
                 for i in range(len(dependencies)):
                     r_owner = dependencies[i]['REFERENCED_OWNER']
                     r_type = dependencies[i]['REFERENCED_TYPE']
                     r_name = dependencies[i]['REFERENCED_NAME']
                     if r_owner != self.user.upper():
-                        dependencies.remove(dependencies[i])
-                        outer_refs.append(selected_sources.pop(selected_sources.index(src)))
-                        outer_refs[-1] = list(outer_refs[-1])
-                        outer_refs[-1].append(r_owner)
-                        outer_refs[-1].append(r_name)
-                        outer_refs[-1].append(r_type)
-                dependencies = [[dependencies[i]['REFERENCED_NAME'], dependencies[i]['REFERENCED_TYPE']] for i in range(len(dependencies))]
+                        try:
+                            if r_type in ['TABLE', 'VIEW']:
+                                query = f"SELECT * FROM {r_owner}.{r_name} WHERE rownum = 1"
+                            else:
+                                query = f"SELECT * FROM all_source WHERE owner = '{r_owner}' AND name = '{r_name}' AND line = 1"
+                            res = self.execute_spark_query('ora', query)
+                            if len(res) == 0:
+                                raise Exception
+                        except:
+                            self.message_window(f'Usuário {self.user} não tem acesso ao {r_type} {r_name}\n \
+                                                referenciado por {src}, migração cancelada!')
+                            return
+                dependencies = [[dependencies[i]['REFERENCED_OWNER'], dependencies[i]['REFERENCED_NAME'], dependencies[i]['REFERENCED_TYPE']] for i in range(len(dependencies))]
                 # Detecta se procedimento depende de algum objeto
                 for dep in dependencies:
-                    if dep[1] == 'TABLE':
-                        if dep[0] not in tables:
-                            dep_tables.add(dep[0])
-                    elif dep[1] == 'SEQUENCE' and dep not in selected_sources:
+                    if dep[2] == 'TABLE':
+                        if [dep[0], dep[1]] not in tables:
+                            dep_tables.add([dep[0], dep[1]])
+                    elif dep[2] == 'SEQUENCE' and dep not in selected_sources:
                         selected_sources.append(dep)
                     elif dep not in selected_sources:
                         dep_sources.add(tuple(dep))
             dep_sources = list(dep_sources)
         dep_tables = list(dep_tables)
-        if len(dep_tables) > 0 or len(dep_sources) > 0 or len(outer_refs) > 0:
-            self.draw_dep_window(dep_tables, tables, dep_sources, selected_sources, outer_refs)
+        if len(dep_tables) > 0 or len(dep_sources) > 0:
+            self.draw_dep_window(dep_tables, tables, dep_sources, selected_sources)
         else:
-            self.begin_etl_session(tables, selected_sources, outer_refs)
+            self.begin_etl_session(tables, selected_sources)
 
     # Lista dependencias entre os objetos escolhidos e pede permissão para incluí-los à migração
-    def draw_dep_window(self, dep_tables, sel_tables, dep_sources, sel_sources, outer_references):
+    def draw_dep_window(self, dep_tables, sel_tables, dep_sources, sel_sources):
         window = tk.Toplevel(self)
         ttk.Label(window, text='Algumas das tabelas/procedimentos selecionados dependem das seguintes tabelas/procedimentos\nPara prosseguir elas tambem serão migradas').pack(padx=10, pady=10)
         box_frame1 = ttk.Frame(window)
@@ -883,34 +932,23 @@ class Oracle2Postgres(tk.Toplevel):
         textBox = tk.Text(box_frame1, yscrollcommand=scrollBar.set, state='normal', height=10)
         textBox.pack(pady=10)
         for table in dep_tables:
-            textBox.insert(tk.END, table + f'    TABLE\n')
+            textBox.insert(tk.END, f'{table[0]}.{table[1]}    TABLE\n')
             sel_tables.append(table)
         for src in dep_sources:
-            textBox.insert(tk.END, f'{src[0]}   {src[1]}\n')
+            textBox.insert(tk.END, f'{src[0]}.{src[1]}    {src[2]}\n')
             sel_sources.append(list(src))
         textBox.config(state='disabled')
-        if len(outer_references) > 0:
-            ttk.Label(window, text='Alguns objetos referenciam objetos em diferentes schemas\nEstes serão removidos e listados no arquivo para migração manual').pack(padx=10, pady=10)
-            box_frame2 = ttk.Frame(window)
-            box_frame2.pack(padx=10, pady=10)
-            scrollBar2 = tk.Scrollbar(box_frame2, orient='vertical')
-            scrollBar2.pack(side='right', fill='y')
-            textBox2 = tk.Text(box_frame2, yscrollcommand=scrollBar2.set, state='normal', height=10)
-            textBox2.pack(pady=10)
-            for ref in outer_references:
-                textBox2.insert(tk.END, f"Objeto: {ref[0]}, Tipo: {ref[1]} -> Referencia schema: {ref[2]}, Objeto: {ref[3]}, Tipo: {ref[4]}\n")
-            textBox2.config(state='disabled')
         lower_frame = ttk.Frame(window)
         lower_frame.pack()
-        ttk.Button(lower_frame, text='Concordar', command=lambda: [self.etl_initialization(sel_tables, sel_sources, outer_references), window.destroy()]).pack(side='right', padx=20, pady=10)
+        ttk.Button(lower_frame, text='Concordar', command=lambda: [self.etl_initialization(sel_tables, sel_sources), window.destroy()]).pack(side='right', padx=20, pady=10)
         ttk.Button(lower_frame, text='Cancelar', command=lambda: window.destroy()).pack(side='left', padx=20, pady=10)
 
     # Inicializa a sessão de etl e começa a migrar
     @threaded
-    def begin_etl_session(self, tables, sources, outer_refs=[]):
+    def begin_etl_session(self, tables, sources):
         pg_conf = {'host': self.pg_host, 'port': self.pg_port,'user': self.pg_user, 'password': self.pg_password, 'database': self.pg_database}
         ora_conf = {'host': self.ora_host, 'port': self.ora_port, 'user': self.ora_user, 'password': self.ora_password, 'service': self.ora_service}
-        if not self.no_backup:
+        if not self.full_backup:
             self.write2log(f'Criando backup do schema {self.pg_schema}')
             if self.create_backup(self.pg_schema):
                 pass
@@ -922,46 +960,37 @@ class Oracle2Postgres(tk.Toplevel):
         self.active_sessions.append(etl_session)
         # Começa a migração
         etl_session.start_etl()
-        self.wait4ETL(etl_session, outer_refs)
+        self.wait4ETL(etl_session)
         if self.ora_dba:
             self.draw_schema_selection_window()
         else:
             self.draw_table_selection_window(self.ora_user.upper())
 
     # Espera processo terminar e restaura para o estado anterior em caso de falha
-    @threaded
-    def wait4ETL(self, session, outer_refs):
+    def wait4ETL(self, session):
         # Sei que isso é feio mas não consegui fazer funcionar de outra forma
         # caso encontre um método mais elegante para esperar o processo, sinta-se livre para substituir
         while session._state == 'idle' or session._state == 'executing':
             sleep(1)
         if session._state == 'success':
             self.write2log('Migração concluída com sucesso!')
-            if len(outer_refs) > 0:
-                self.write_outer_refs(outer_refs)
         elif session._state == 'failed':
-            if not self.no_backup:
-                self.write2log('Migração falhou! Retornando base de dados para estado anterior...')
+            self.write2log('Migração falhou! Retornando base de dados para estado anterior...')
+            if self.full_backup:
+                self.restore_from_backup()
+            else:
                 self.restore_from_backup(self.pg_schema)
-                self.write2log('Base de dados retornada ao último estado estável')
+            self.write2log('Base de dados retornada ao último estado estável')
             print(session.error_message)
-        self.remove_backup(self.pg_schema)
+        if self.full_backup:
+            self.remove_backup()
+        else:
+            self.remove_backup(self.pg_schema)
         self.active_sessions.remove(session)
         self.write2log(f'Terminada sessão de ETL {self.etl.__hash__()}')
         del session
 
-    def write_outer_refs(self, outer_refs):
-        OUTER_REF_FILE = os.path.join(APP_HOME, 'manual_migrations/outer_references.txt')
-        with open(OUTER_REF_FILE, 'a') as file:
-            data = datetime.datetime.strftime(datetime.datetime.now(), "%d/%m/%Y %H:%M:%S") + ': ' + data + '\n'
-            file.write(data)
-            file.write(f'Sessão ETL {self.__hash__()} Oracle {self.user} -> Postgres {self.pg_schema}\n')
-            file.write(('-' * 50) + '\n')
-            for ref in outer_refs:
-                file.write(f"User: {self.user}, Objeto: {ref[0]}, Tipo: {ref[1]} -> Referencia schema: {ref[2]}, Objeto: {ref[3]}, Tipo: {ref[4]}\n")
-            file.write('\n\n')
-            file.close()
-
+# Vice versa
 class Postgres2Oracle(tk.Toplevel):
     def __init__(self, master, conn_session):
         super().__init__(master)
@@ -1427,7 +1456,7 @@ class Postgres2Oracle(tk.Toplevel):
     def begin_etl_session(self, tables, sources):
         pg_conf = {'host': self.pg_host, 'port': self.pg_port,'user': self.pg_user, 'password': self.pg_password, 'database': self.pg_database}
         ora_conf = {'host': self.ora_host, 'port': self.ora_port, 'user': self.ora_user, 'password': self.ora_password, 'service': self.ora_service}
-        if not self.no_backup:
+        if not self.full_backup:
             self.write2log(f'Criando backup do schema {self.ora_user}')
             self.create_backup(self.ora_user)
         self.write2log(f'Iniciando sessão {self.__hash__()} de Postgres {self.pg_url} para Oracle {self.ora_url}')
@@ -1438,3 +1467,19 @@ class Postgres2Oracle(tk.Toplevel):
         etl_session.start_etl()
         self.wait4ETL(etl_session)
         self.draw_schema_selection_window()
+
+    def wait4ETL(self, session):
+        while session._state == 'idle' or session._state == 'executing':
+            sleep(1)
+        if session._state == 'success':
+            self.write2log('Migração concluída com sucesso!')
+        elif session._state == 'failed':
+            if not self.full_backup:
+                self.write2log('Migração falhou! Retornando base de dados para estado anterior...')
+                self.restore_from_backup(self.pg_schema)
+                self.write2log('Base de dados retornada ao último estado estável')
+            print(session.error_message)
+        self.remove_backup(self.pg_schema)
+        self.active_sessions.remove(session)
+        self.write2log(f'Terminada sessão de ETL {self.etl.__hash__()}')
+        del session

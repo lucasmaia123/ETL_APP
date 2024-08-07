@@ -56,7 +56,7 @@ class ETL_session_UI(tk.Toplevel):
             self.tables = tables
             self.sources = sources
             self.etl = etl
-            self.schema = schema
+            self.pg_schema = schema
             self.master = master
             # Conexões genéricas para execução de DML/DDL (PySpark apenas executa queries para coleta de dados)
             # (auto-commit ON, usar a função commit() ou fetch() em operações DML/DDL causará erro,
@@ -130,21 +130,21 @@ class Oracle2PostgresETL(ETL_session_UI):
             query = "SELECT nspname FROM pg_catalog.pg_namespace"
             pg_schemas = self.execute_spark_query('pg', query)
             pg_schemas = [pg_schemas[i]['nspname'] for i in range(len(pg_schemas))]
-            if self.schema not in pg_schemas:
+            if self.pg_schema not in pg_schemas:
                 cur = self.pg_conn.cursor()
-                cur.execute(f"CREATE SCHEMA {self.schema}")
+                cur.execute(f"CREATE SCHEMA {self.pg_schema}")
                 cur.close()
-                self.write2display(f'Schema {self.schema} criado no Postgres!')
-            query = f'''SELECT table_name FROM information_schema.tables WHERE table_schema = '{self.schema}' '''
+                self.write2display(f'Schema {self.pg_schema} criado no Postgres!')
+            query = f'''SELECT table_name FROM information_schema.tables WHERE table_schema = '{self.pg_schema}' '''
             self.pg_tables = self.execute_spark_query('pg', query)
             self.pg_tables = [self.pg_tables[i]['table_name'] for i in range(len(self.pg_tables))]
-            query = f'''SELECT proname FROM pg_proc p join pg_namespace n on n.oid = p.pronamespace where nspname = '{self.schema}' '''
+            query = f'''SELECT proname FROM pg_proc p join pg_namespace n on n.oid = p.pronamespace where nspname = '{self.pg_schema}' '''
             self.pg_source = self.execute_spark_query('pg', query)
             self.pg_source = [self.pg_source[i]['proname'] for i in range(len(self.pg_source))]
             # Executa extração de cada tabela/source em threads assincronas
             # O número no método define quantos objetos serão extraídos simultaneamente
             # Aumentar este valor fará o processo mais rápido mas poderá causar instabilidades
-            with ThreadPoolExecutor(5) as executor:
+            with ThreadPoolExecutor(1) as executor:
                 failures = []
                 for table in self.tables:
                     self.table_queue.put_nowait(table)
@@ -153,10 +153,10 @@ class Oracle2PostgresETL(ETL_session_UI):
                     while not self.table_queue.empty():
                         table = self.table_queue.get_nowait()
                         print(f'table {table}')
-                        self.dependency_futures[table] = executor.submit(self.extract_table, table)
+                        self.dependency_futures[table[1]] = executor.submit(self.extract_table, table)
                     for future in as_completed(self.dependency_futures.values()):
                         res = future.result()
-                        name = res[1]
+                        name = res[1][1]
                         dep = res[2]
                         if res[0] == 'failed':
                             failures.append(name)
@@ -165,7 +165,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                             if dep in failures:
                                 failures.append(name)
                             if name not in failures:
-                                self.table_queue.put_nowait(name)
+                                self.table_queue.put_nowait(res[1])
                 wait(list(self.dependency_futures.values()))
                 self.dependency_futures = {}
                 for source in self.sources:
@@ -175,10 +175,10 @@ class Oracle2PostgresETL(ETL_session_UI):
                     while not self.source_queue.empty():
                         source = self.source_queue.get_nowait()
                         print(f'source {source}')
-                        self.dependency_futures[source[0]] = executor.submit(self.extract_source, source)
+                        self.dependency_futures[source[1]] = executor.submit(self.extract_source, source)
                     for future in as_completed(self.dependency_futures.values()):
                         res = future.result()
-                        name = res[1][0]
+                        name = res[1][1]
                         dep = res[2]
                         if res[0] == 'failed':
                             failures.append(name)
@@ -202,11 +202,13 @@ class Oracle2PostgresETL(ETL_session_UI):
             self.error_message = e
 
     # Coleta informações sobre uma tabela do cluster
-    def extract_table(self, table_name):
-        self.write2display(f'Coletando {table_name}...')
+    def extract_table(self, table):
+        table_schema = table[0]
+        table_name = table[1]
+        self.write2display(f'Coletando {table_schema}.{table_name}...')
         table_data = {}
         # Pega informações sobre as colunas da tabela
-        data = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, dbtable=f'{self.user}.{table_name}').load()
+        data = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, dbtable=f'{table_schema.lower()}.{table_name.lower()}').load()
         # Muda os nomes das tabelas para letras minusculas
         data = data.select([col(x).alias(x.lower()) for x in data.columns])
         table_data['data'] = data
@@ -214,8 +216,8 @@ class Oracle2PostgresETL(ETL_session_UI):
         table_data['auto'] = None
         # Encontra as chaves primarias
         pk_query = f"SELECT cols.table_name, cons.constraint_name, cols.column_name \
-                    FROM all_cons_columns cols, all_constraints cons \
-                    WHERE cols.owner = '{self.user}' AND cons.owner = '{self.user}' AND cols.table_name = '{table_name}' AND cons.table_name = '{table_name}' \
+                    FROM all_cons_columns cols JOIN all_constraints cons ON cols.owner = cons.owner and cols.table_name = cons.table_name \
+                    WHERE cols.owner = '{table_schema}' AND cols.table_name = '{table_name}' \
                     AND cons.constraint_type = 'P' \
                     AND cons.constraint_name = cols.constraint_name \
                     AND cols.owner = cons.owner"
@@ -225,12 +227,11 @@ class Oracle2PostgresETL(ETL_session_UI):
             table_data['pk'] = pk
         # Encontra as chaves estrangeiras
         fk_query = f"SELECT cols.table_name, cons.constraint_name, cols.column_name \
-                    FROM all_constraints cons, all_cons_columns cols \
-                    WHERE cols.owner = '{self.user}' AND cons.owner = '{self.user}' \
-                    AND cols.table_name = '{table_name}' AND cons.table_name = '{table_name}' \
-                    AND cons.constraint_type = 'R' \
+                    FROM all_constraints cons JOIN all_cons_columns cols ON cons.owner = cols.owner \
+                    AND cons.table_name = cols.table_name AND cons.owner = cols.owner \
                     AND cons.constraint_name = cols.constraint_name \
-                    AND cols.owner = cons.owner \
+                    WHERE cols.owner = '{table_schema}' AND cols.table_name = '{table_name}' \
+                    AND cons.constraint_type = 'R' \
                     ORDER BY cols.table_name"
         fk = self.execute_spark_query('ora', fk_query)
         fk_dict = {}
@@ -244,78 +245,73 @@ class Oracle2PostgresETL(ETL_session_UI):
             # Encontra as referencias das chaves estrangeiras
             for constraint, columns in fk_dict.items():
                 ref_query = f"SELECT cols.table_name, cols.column_name, cons.delete_rule, cols.owner \
-                            FROM all_cons_columns cols, all_constraints cons \
-                            WHERE cols.constraint_name in \
-                            (SELECT r_constraint_name FROM all_constraints \
-                            WHERE owner = '{self.user}' AND constraint_name = '{constraint}') \
-                            AND cols.constraint_name = cons.r_constraint_name \
-                            AND cons.owner = '{self.user}' AND cons.table_name = '{table_name}'"
+                            FROM all_cons_columns cols JOIN all_constraints cons ON cols.constraint_name = cons.r_constraint_name \
+                            WHERE cons.constraint_name = '{constraint}' AND cons.owner = '{table_schema}' AND cons.table_name = '{table_name}'"
                 ref = self.execute_spark_query('ora', ref_query)
                 ref_columns = [ref[i]['COLUMN_NAME'] for i in range(len(ref))]
-                table_data['fk'][constraint] = {'src_table': table_name,'src_column': columns,'ref_table': ref[0]['TABLE_NAME'], 'ref_column': ref_columns, 'on_delete': ref[0]['DELETE_RULE']}
+                table_data['fk'][constraint] = {'src_owner': table_schema, 'src_table': table_name, 'src_column': columns, 'ref_owner': ref[0]['OWNER'], 'ref_table': ref[0]['TABLE_NAME'], 'ref_column': ref_columns, 'on_delete': ref[0]['DELETE_RULE']}
         # Coleta as informações especificas às colunas
-        tab_query = f"select column_name, data_type, data_default from all_tab_columns where table_name = '{table_name}'"
+        tab_query = f"select column_name, data_type, data_default from all_tab_columns where table_name = '{table_name}' AND owner = '{table_schema}'"
         cdata = self.execute_spark_query('ora', tab_query)
         # Checa se chave primaria com auto incremento foi definida com IDENTITY
         for column in cdata:
             if column['DATA_DEFAULT']:
                 table_data['auto'] = pk[pk.index(column['COLUMN_NAME'])]
                 table_data['seq'] = column['DATA_DEFAULT'].split('.')[1]
-        if table_name in self.pg_tables:
-            self.write2display(f'{table_name} já existe no postgres, substituindo...')
         if fk:
             for value in table_data['fk'].values():
                 # Espera pela extração de uma tabela a qual depende
                 if (self.dependency_futures[value['ref_table']]._state == 'PENDING' or not self.dependency_futures[value['ref_table']].done()) and value['ref_table'] != table_name:
                     self.write2display(f"Tabela {table_name} depende da tabela {value['ref_table']}, adiando extração...")
-                    return ['waiting', table_name, value['ref_table']]
-        self.write2display(f"Extração concluída na tabela {table_name}")
-        res = self.load_table(table_data, table_name.lower())
-        return [res, table_name, None]
+                    return ['waiting', table, value['ref_table']]
+        self.write2display(f"Extração concluída na tabela {table_schema}.{table_name}")
+        res = self.load_table(table_data, table)
+        return [res, table, None]
 
     # Carrega dados de uma tabela para a base de dados alvo
     def load_table(self, df, tbl):
+        table_name = tbl[1].lower()
         # Estabelece conexão genérica
         cur = self.pg_conn.cursor()
-        if tbl in self.pg_tables:
-            self.write2display(f"Tabela {tbl} já existe no schema {self.schema}, substituindo...")
-            cur.execute(f"DROP TABLE {self.schema}.{tbl} CASCADE")
-        self.write2display(f"Carregando {df['data'].count()} colunas da tabela {tbl}...")
+        if table_name in self.pg_tables:
+            self.write2display(f"Tabela {table_name} já existe no schema {self.pg_schema}, substituindo...")
+            cur.execute(f"DROP TABLE {self.pg_schema}.{table_name} CASCADE")
+        self.write2display(f"Carregando {df['data'].count()} colunas da tabela {table_name}...")
         try:
             # Carrega a informação extraida sem dependencias ou constraints
-            df['data'].repartition(5).write.mode('overwrite').format('jdbc').options(url=self.pg_url, user=self.pg_user, password=self.pg_password, driver=self.pg_driver, dbtable=f'{self.schema}.{tbl}', batch=1000000).save()
-            self.write2display(f'Carregando dependencias da tabela {tbl}...')
+            df['data'].repartition(5).write.mode('overwrite').format('jdbc').options(url=self.pg_url, user=self.pg_user, password=self.pg_password, driver=self.pg_driver, dbtable=f'{self.pg_schema}.{table_name}', batch=1000000).save()
+            self.write2display(f'Carregando dependencias da tabela {table_name}...')
             # Adiciona dependencia de chave primária
             pk_columns = self.list2str(df['pk'])
-            cur.execute(f"ALTER TABLE {self.schema}.{tbl} ADD PRIMARY KEY {pk_columns}")
+            cur.execute(f"ALTER TABLE {self.pg_schema}.{table_name} ADD PRIMARY KEY {pk_columns}")
             if df['auto']:
                 last_val = df['data'].agg({df['auto']: 'max'}).collect()[0]
                 cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class AS cls \
-                            ON seq.seqrelid = cls.oid AND cls.relname = '{tbl}_{df['auto'].lower()}_seq'")
+                            ON seq.seqrelid = cls.oid AND cls.relname = '{table_name}_{df['auto'].lower()}_seq'")
                 res = cur.fetchall()
                 if len(res):
-                    cur.execute(f"DROP SEQUENCE {tbl}_{df['auto'].lower()}_seq")
-                cur.execute(f'''CREATE SEQUENCE {tbl}_{df['auto'].lower()}_seq START WITH {int(last_val[f"max({df['auto']})"])}''')
-                cur.execute(f'''ALTER TABLE {self.schema}.{tbl} ALTER COLUMN "{df['auto'].lower()}" SET DEFAULT nextval('{tbl}_{df['auto'].lower()}_seq')''')
-                cur.execute(f"ALTER SEQUENCE {tbl}_{df['auto'].lower()}_seq OWNER TO {self.user}")
+                    cur.execute(f"DROP SEQUENCE {table_name}_{df['auto'].lower()}_seq CASCADE")
+                cur.execute(f'''CREATE SEQUENCE {table_name}_{df['auto'].lower()}_seq START WITH {int(last_val[f"max({df['auto']})"])}''')
+                cur.execute(f'''ALTER TABLE {self.pg_schema}.{table_name} ALTER COLUMN "{df['auto'].lower()}" SET DEFAULT nextval('{table_name}_{df['auto'].lower()}_seq')''')
+                cur.execute(f"ALTER SEQUENCE {table_name}_{df['auto'].lower()}_seq OWNER TO {self.pg_user}")
         except Exception as e:
-            self.write2display(f"Carregamento da tabela {tbl} falhou!\nObjetos dependentes não serão migrados!")
+            self.write2display(f"Carregamento da tabela {table_name} falhou!\nObjetos dependentes não serão migrados!")
             print(e)
             return 'failed'
         # Adiciona dependencias de chaves estrangeiras
         if df['fk']:
             for key, value in df['fk'].items():
-                cur.execute(f"ALTER TABLE {self.schema}.{value['src_table'].lower()} ADD CONSTRAINT {key} FOREIGN KEY {self.list2str(value['src_column'])} REFERENCES {self.schema}.{value['ref_table'].lower()} {self.list2str(value['ref_column'])} ON DELETE {value['on_delete']}")
-        self.write2display(f"{df['data'].count()} colunas importadas da tabela {tbl} para postgres!")
+                cur.execute(f"ALTER TABLE {self.pg_schema}.{value['src_table'].lower()} ADD CONSTRAINT {key} FOREIGN KEY {self.list2str(value['src_column'])} REFERENCES {self.pg_schema}.{value['ref_table'].lower()} {self.list2str(value['ref_column'])} ON DELETE {value['on_delete']}")
+        self.write2display(f"{df['data'].count()} colunas importadas da tabela {table_name} para postgres!")
         cur.close()
-        return self.test_table(df, tbl)
+        return self.test_table(df, table_name)
 
     # Testa se todas as funcionalidades da tabela foram devidamente migradas
     def test_table(self, df, tbl):
         self.write2display(f"Realizando testes na tabela {tbl}...")
         cur = self.pg_conn.cursor()
         try:
-            column_count = self.execute_spark_query('pg', f'SELECT count(*) FROM {self.schema}.{tbl}')
+            column_count = self.execute_spark_query('pg', f'SELECT count(*) FROM {self.pg_schema}.{tbl}')
             if column_count[0]['count'] != df['data'].count():
                 self.write2display(f'Detectada inconsistencia no número de colunas da tabela {tbl}, tente migra-la novamente!')
                 return 'failed'
@@ -325,7 +321,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                         ON rel.oid = con.conrelid \
                         INNER JOIN pg_catalog.pg_namespace nsp \
                         ON nsp.oid = connamespace \
-                        WHERE nsp.nspname = '{self.schema}' \
+                        WHERE nsp.nspname = '{self.pg_schema}' \
                         AND rel.relname = '{tbl}'")
             cons = cur.fetchall()
             cons = [cons[i][0] for i in range(len(cons))]
@@ -362,15 +358,16 @@ class Oracle2PostgresETL(ETL_session_UI):
     
     # Organizador para extração paralela de sources
     def extract_source(self, data):
-        name = data[0]
-        type = data[1]
+        owner = data[0]
+        name = data[1]
+        type = data[2]
         self.write2display(f'Extraindo {type} {name}')
         if type == 'SEQUENCE':
             # Sequencias não precisam de tradução, então já a adiciona imediatamente
             cur = self.oracle_conn.cursor()
-            cur.execute(f"select last_number, increment_by from all_sequences where sequence_owner = '{self.user}' and sequence_name = '{name}'")
+            cur.execute(f"select last_number, increment_by from all_sequences where sequence_owner = '{owner}' and sequence_name = '{name}'")
             res = cur.fetchall()
-            last_val = res[0][0]
+            last_val = res[0][0] + 1
             increment = res[0][1]
             cur.close()
             cur = self.pg_conn.cursor()
@@ -378,15 +375,16 @@ class Oracle2PostgresETL(ETL_session_UI):
                 ON seq.seqrelid = cls.oid AND cls.relname = '{name.lower()}'")
             res = cur.fetchall()
             if len(res):
-                cur.execute(f"DROP SEQUENCE {name.lower()}")
+                cur.execute(f"DROP SEQUENCE {name.lower()} CASCADE")
             cur.execute(f"CREATE SEQUENCE {name.lower()} INCREMENT BY {increment} START WITH {last_val}")
+            self.write2display(f'Sequence {name.lower()} inserido no Postgres!')
             return ['done', data, None]
         if type == 'VIEW':
-            query = f"SELECT text FROM all_views WHERE owner = '{self.user}' AND view_name = '{name}'"
+            query = f"SELECT text FROM all_views WHERE owner = '{owner}' AND view_name = '{name}'"
         else:
-            query = f"SELECT text, line FROM all_source WHERE owner = '{self.user}' AND name = '{name}' ORDER BY line"
+            query = f"SELECT text, line FROM all_source WHERE owner = '{owner}' AND name = '{name}' ORDER BY line"
         source = self.execute_spark_query('ora', query)
-        query = f"SELECT referenced_name, referenced_type FROM all_dependencies WHERE owner = '{self.user}' AND name = '{name}' AND referenced_type in ('PROCEDURE', 'FUNCTION', 'VIEW')"
+        query = f"SELECT referenced_name, referenced_type FROM all_dependencies WHERE owner = '{owner}' AND name = '{name}' AND referenced_type in ('PROCEDURE', 'FUNCTION', 'VIEW')"
         dependencies = self.execute_spark_query('ora', query)
         if type == 'VIEW':
             source_body = [f"{self.normalize_name(name)} AS {source[0]['TEXT']}"]
@@ -409,7 +407,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                 if '"' in name[i]:
                     name[i] = name[i].removeprefix('"')
                     name[i] = name[i].removesuffix('"')
-            if name[0].lower() != self.schema:
+            if name[0].lower() != self.pg_schema:
                 return None
             return name[1].lower()
         elif '"' in name:
@@ -422,8 +420,8 @@ class Oracle2PostgresETL(ETL_session_UI):
         began = False
         for i in range(len(tokens)):
             # Procura referencias a tabelas declaradas e adiciona o nome do schema
-            if '%TYPE' in tokens[i] and self.schema.lower() != 'public':
-                tokens[i] = self.schema + '.' + tokens[i]
+            if '%TYPE' in tokens[i] and self.pg_schema.lower() != 'public':
+                tokens[i] = self.pg_schema + '.' + tokens[i]
             if tokens[i].lower() == 'begin':
                 began = True
                 continue
@@ -439,8 +437,8 @@ class Oracle2PostgresETL(ETL_session_UI):
                             if is_view[0]['OWNER'] == 'SYS':
                                 # Referencia a meta view, não traduzível!
                                 return False    
-                        if self.schema.lower() != 'public':
-                            tokens[aux] = f'{self.schema}.{tokens[aux]}'
+                        if self.pg_schema.lower() != 'public':
+                            tokens[aux] = f'{self.pg_schema}.{tokens[aux]}'
                     aux += 1
             if tokens[i].lower() in ['in', 'out', 'in out'] and not began:
                 aux = tokens[i]
@@ -548,7 +546,7 @@ class Oracle2PostgresETL(ETL_session_UI):
     # Postgresql só executa trigger com chamada de função, cria um trigger com a função apropriada
     def create_trigger_function(self, data, name, attributes = None):
         fn_name = f"fn_{name}"
-        func_body = f"CREATE OR REPLACE FUNCTION {self.schema}.{fn_name}() RETURNS TRIGGER LANGUAGE PLPGSQL AS \n$$\n"
+        func_body = f"CREATE OR REPLACE FUNCTION {self.pg_schema}.{fn_name}() RETURNS TRIGGER LANGUAGE PLPGSQL AS \n$$\n"
         for i, token in enumerate(data):
             if i == 0:
                 # Funções de trigger no postgres não podem receber parâmetros diretamente
@@ -578,7 +576,7 @@ class Oracle2PostgresETL(ETL_session_UI):
         cur = self.pg_conn.cursor()
         cur.execute(func_body)
         cur.close()
-        self.write2display(f"Bloco plsql encapsulado na função {fn_name} e carregado no Postgresql!")
+        self.write2display(f"Bloco plsql encapsulado na função {fn_name}!")
         return fn_name
 
     # Cria uma função de trigger baseada em uma função/procedure genérica
@@ -656,7 +654,7 @@ class Oracle2PostgresETL(ETL_session_UI):
             # Em Postgres, triggers herdam o schema da tabela relacionada
             source_body = f"CREATE OR REPLACE {type} {source_name} "
         else:
-            source_body = f"CREATE OR REPLACE {type} {self.schema}.{source_name} "
+            source_body = f"CREATE OR REPLACE {type} {self.pg_schema}.{source_name} "
         tokens = []
         # Quebra o corpo dos dados em tokens para processamento
         for i, line in enumerate(data):
@@ -698,7 +696,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                     # Adapta bloco pl/sql em trigger_function compatível com Postgres
                     func = self.create_trigger_function(block_data, source_name)
                     data_aux['trig_func'] = func
-                    source_body += f"EXECUTE FUNCTION {self.schema}.{func}();"
+                    source_body += f"EXECUTE FUNCTION {self.pg_schema}.{func}();"
                     break
                 # Function call trigger
                 if tokens[i].lower() == 'call':
@@ -714,7 +712,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                     if func == 'failed':
                         return 'failed'
                     data_aux['trig_func'] = func
-                    source_body += f"EXECUTE FUNCTION {self.schema}.{func}"
+                    source_body += f"EXECUTE FUNCTION {self.pg_schema}.{func}"
                     continue
                 if i == len(tokens) - 1:
                     source_body += tokens[i] + ';'
@@ -801,7 +799,7 @@ class Oracle2PostgresETL(ETL_session_UI):
             self.write2display(f"Função de sistema não suportada detectada em {source_name}\n{source_name} será adicionado em manual_migrations para migração manual!")
             make_txt_file(source_name, source_body)
             return 'failed'
-        if source_name in [self.pg_source[i]['proname'] for i in range(len(self.pg_source))]:
+        if source_name in self.pg_source:
             self.write2display(f'Substituindo {type} {source_name} no Postgresql...')
             cur.execute(f"DROP {type} {source_name} CASCADE;")
         else:
@@ -826,7 +824,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                 cur.execute(f"SELECT tg.tgname FROM pg_proc AS pc \
                             JOIN pg_trigger AS tg ON pc.oid = tg.tgfoid \
                             JOIN pg_namespace AS ns ON pc.pronamespace = ns.oid \
-                            WHERE ns.nspname = '{self.schema}' AND pc.proname = '{data['trig_func']}'")
+                            WHERE ns.nspname = '{self.pg_schema}' AND pc.proname = '{data['trig_func']}'")
                 res = cur.fetchall()
                 res = [res[i][0] for i in range(len(res))]
                 if name not in res:
@@ -837,7 +835,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                 # Checa se o trigger está associado a tabela
                 cur.execute(f"SELECT cls.relname FROM pg_trigger trig \
                             JOIN pg_class AS cls ON cls.oid = trig.tgrelid JOIN pg_namespace AS ns \
-                            ON cls.relnamespace = ns.oid WHERE ns.nspname = '{self.schema}' AND trig.tgname = '{name}'")
+                            ON cls.relnamespace = ns.oid WHERE ns.nspname = '{self.pg_schema}' AND trig.tgname = '{name}'")
                 res = cur.fetchall()
                 res = [res[i][0] for i in range(len(res))]
                 if ref not in res:
@@ -848,7 +846,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                 # Checa se função existe
                 cur.execute(f"SELECT proname FROM pg_proc AS pc JOIN pg_namespace AS np \
                             ON pc.pronamespace = np.oid \
-                            WHERE np.nspname = '{self.schema}' AND pc.proname = '{name}'")
+                            WHERE np.nspname = '{self.pg_schema}' AND pc.proname = '{name}'")
                 res = cur.fetchall()
                 if len(res) == 0:
                     self.write2display(f'{type} {name} não foi apropriadamente migrado, tente novamente!')
@@ -857,7 +855,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                 # Talvez criar uma ferramenta que tenta executar a função (difícil)
             if type == 'VIEW':
                 # Checa se view existe
-                cur.execute(f"SELECT viewname FROM pg_views WHERE schemaname = '{self.schema}' AND viewname = '{name}'")
+                cur.execute(f"SELECT viewname FROM pg_views WHERE schemaname = '{self.pg_schema}' AND viewname = '{name}'")
                 res = cur.fetchall()
                 if len(res) == 0:
                     self.write2display(f'{type} {name} não foi apropriadamente migrado, tente novamente!')
@@ -887,11 +885,11 @@ class Postgres2OracleETL(ETL_session_UI):
             self.draw_app_window()
             while not self.done_drawing:
                 pass
-            query = f'''SELECT table_name FROM all_users WHERE owner = '{self.schema}' AND tablespace_name not like 'SYS%' '''
+            query = f'''SELECT table_name FROM all_users WHERE owner = '{self.user}' AND tablespace_name not like 'SYS%' '''
             self.ora_tables = self.execute_spark_query('ora', query)
             self.ora_tables = [self.ora_tables[i]['TABLE_NAME'] for i in range(len(self.ora_tables))]
-            query = f"SELECT name, type FROM all_source WHERE owner = '{self.schema}' AND line = 1 \
-                    UNION SELECT view_name, 'VIEW' FROM all_views WHERE owner = '{self.schema}'"
+            query = f"SELECT name, type FROM all_source WHERE owner = '{self.pg_schema}' AND line = 1 \
+                    UNION SELECT view_name, 'VIEW' FROM all_views WHERE owner = '{self.pg_schema}'"
             self.ora_sources = self.execute_spark_query('ora', query)
             self.ora_sources = [[self.ora_sources[i]['NAME'], self.ora_sources[i]['TYPE']] for i in range(len(self.ora_sources))]
             # Executa extração de cada tabela/source em threads assincronas
@@ -1015,7 +1013,7 @@ class Postgres2OracleETL(ETL_session_UI):
                     self.write2display(f"Tabela {table_name} depende da tabela {value['ref_table']}, adiando extração...")
                     return ['waiting', table_name, value['ref_table']]
         self.write2display(f"Extração concluída na tabela {table_name}")
-        res = self.load_table(table_data, table_name.lower())
+        res = self.load_table(table_data, table_name)
         return [res, table_name, None]
 
     # Carrega dados de uma tabela para a base de dados alvo
@@ -1023,16 +1021,16 @@ class Postgres2OracleETL(ETL_session_UI):
         # Estabelece conexão genérica
         cur = self.oracle_conn.cursor()
         if tbl in self.ora_tables:
-            self.write2display(f"Tabela {tbl} já existe no schema {self.schema}, substituindo...")
-            cur.execute(f"DROP TABLE {self.schema}.{tbl} CASCADE")
+            self.write2display(f"Tabela {tbl} já existe no schema {self.user}, substituindo...")
+            cur.execute(f"DROP TABLE {self.user}.{tbl} CASCADE")
         self.write2display(f"Carregando {df['data'].count()} colunas da tabela {tbl}...")
         try:
             # Carrega a informação extraida sem dependencias ou constraints
-            df['data'].repartition(5).write.mode('overwrite').format('jdbc').options(url=self.ora_url, user=self.ora_user, password=self.ora_password, driver=self.ora_driver, dbtable=f'{self.schema}.{tbl}', batch=1000000).save()
+            df['data'].repartition(5).write.mode('overwrite').format('jdbc').options(url=self.ora_url, user=self.ora_user, password=self.ora_password, driver=self.ora_driver, dbtable=f'{self.user}.{tbl}', batch=1000000).save()
             self.write2display(f'Carregando dependencias da tabela {tbl}...')
             # Adiciona dependencia de chave primária
             pk_columns = self.list2str(df['pk'])
-            cur.execute(f"ALTER TABLE {self.schema}.{tbl} ADD CONSTRAINT PRIMARY KEY {pk_columns}")
+            cur.execute(f"ALTER TABLE {self.user}.{tbl} ADD CONSTRAINT PRIMARY KEY {pk_columns}")
             if df['auto']:
                 last_val = df['data'].agg({df['auto']: 'max'}).collect()[0]
                 cur.execute(f"SELECT sequence_name FROM all_sequences WHERE sequence_name = '{tbl.upper()}_{df['auto'].upper()}_seq'")
@@ -1040,7 +1038,7 @@ class Postgres2OracleETL(ETL_session_UI):
                 if len(res):
                     cur.execute(f"DROP SEQUENCE {tbl.upper()}_{df['auto'].upper()}_seq")
                 cur.execute(f'''CREATE SEQUENCE {tbl.upper()}_{df['auto'].upper()}_seq START WITH {int(last_val[f"max({df['auto']})"])}''')
-                cur.execute(f'''ALTER TABLE {self.schema}.{tbl} MODIFY "{df['auto'].upper()}" DEFAULT {tbl}_{df['auto'].lower()}_seq.nextval ''')
+                cur.execute(f'''ALTER TABLE {self.pg_schema}.{tbl} MODIFY "{df['auto'].upper()}" DEFAULT {tbl}_{df['auto'].lower()}_seq.nextval ''')
         except Exception as e:
             self.write2display(f"Carregamento da tabela {tbl} falhou!\nObjetos dependentes não serão migrados!")
             print(e)
@@ -1048,7 +1046,42 @@ class Postgres2OracleETL(ETL_session_UI):
         # Adiciona dependencias de chaves estrangeiras
         if df['fk']:
             for key, value in df['fk'].items():
-                cur.execute(f"ALTER TABLE {self.schema}.{value['src_table'].upper()} ADD CONSTRAINT {key} FOREIGN KEY {self.list2str(value['src_column'])} REFERENCES {self.schema}.{value['ref_table'].lower()} {self.list2str(value['ref_column'])} ON DELETE {value['on_delete']}")
+                cur.execute(f"ALTER TABLE {self.user}.{value['src_table'].upper()} ADD CONSTRAINT {key} FOREIGN KEY {self.list2str(value['src_column'])} REFERENCES {self.user}.{value['ref_table'].lower()} {self.list2str(value['ref_column'])} ON DELETE {value['delete_rule']}")
         self.write2display(f"{df['data'].count()} colunas importadas da tabela {tbl} para postgres!")
         cur.close()
         return self.test_table(df, tbl)
+    
+    def test_table(self, df, tbl):
+        self.write2display(f"Realizando testes na tabela {tbl}...")
+        cur = self.pg_conn.cursor()
+        try:
+            column_count = self.execute_spark_query('ora', f'SELECT count(*) FROM {self.user}.{tbl}')
+            if column_count[0]['count'] != df['data'].count():
+                self.write2display(f'Detectada inconsistencia no número de colunas da tabela {tbl}, tente migra-la novamente!')
+                return 'failed'
+            cur.execute(f"SELECT cols.column_name FROM all_constraints cons \
+                        JOIN all_cons_columns cols ON cons.constraint_name = cols.constraint_name \
+                        WHERE constraint_type = 'P' AND cons.owner = '{self.user}' AND cons.table_name = '{tbl}'")
+            pk_columns = cur.fetchall()
+            pk_columns = [pk_columns[i][0] for i in range(len(pk_columns))]
+            for column in pk_columns:
+                if column.lower() not in df['pk']:
+                    self.write2display(f'Detectada inconsistencia na tabela {tbl}, tente migra-la novamente!')
+                    return 'failed'
+            if df['fk']:
+                cur.execute(f"SELECT DISTINCT cons.constraint_name FROM all_constraints cons JOIN all_cons_columns cols \
+                            ON cons.constraint_name = cols.constraint_name WHERE cons.constraint_type = 'R' \
+                            AND cons.owner = '{self.user}' AND cons.table_name = '{tbl}'")
+                cons = cur.fetchall()
+                cons = [cons[i][0] for i in range(len(cons))]
+                for key in df['fk'].keys():
+                    if key.upper() not in cons:
+                        self.write2display(f'Detectada inconsistencia na tabela {tbl}, tente migra-la novamente!')
+                        return 'failed'
+            cur.close()
+            self.write2display(f'Tabela {tbl} foi migrada com sucesso!')
+            return 'done'
+        except Exception as e:
+            self.write2display(f'Algo deu errado, tabela {tbl} não foi migrada!')
+            print('Error ' + str(e))
+            return 'failed'

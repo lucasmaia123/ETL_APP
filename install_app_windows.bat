@@ -16,7 +16,7 @@ python --version >nul 2>&1 && set python=python || (
 
 pip --version >nul 2>&1 || (
    echo pip não encontrado, tentando instalar pip...
-   %python% -m ensurepip --upgrade >nul 2>&1 && pip --version >nul 2>%1 || (
+   %python% -m ensurepip --upgrade >nul 2>&1 && pip --version >nul 2>&1 || (
       echo Falha na instalação do pip, por favor baixe e instale o pip e tente novamente!
       PAUSE
       goto :EOF
