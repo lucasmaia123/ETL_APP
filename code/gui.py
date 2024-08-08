@@ -204,7 +204,8 @@ class etl_UI(tk.Frame):
             if self.migration_direction.get() == 1:
                 Oracle2Postgres(self, etl)
             if self.migration_direction.get() == 2:
-                Postgres2Oracle(self, etl)
+                self.message_window('Não implementado!')
+                etl.stop()
             response.config(text='')
 
     # Testa as credenciais de conexão fornecidas
@@ -281,9 +282,7 @@ class Oracle2Postgres(tk.Toplevel):
         except Exception as e:
             print('Error' + str(e))
 
-    # Cria um backup de um schema Postgres antes de realizar o ETL.
-    # Considere modificar essa função para fazer backup apenas das tabelas migradas
-    # caso esteja demorando muito para criar o backup de todo o schema
+    # Cria um backup de um schema ou de toda a base de dados antes de realizar o ETL.
     def create_backup(self, schema=None):
         try:
             if schema:
@@ -292,11 +291,19 @@ class Oracle2Postgres(tk.Toplevel):
             else:
                 BACKUP_FILE = os.path.join(APP_HOME, f'backups/{self.__hash__()}_database_backup.dmp')
                 command = f"pg_dump --no-password -h {self.pg_host} -p {self.pg_port} -d {self.pg_database} -U {self.pg_user} -Fc -f {BACKUP_FILE}"
+            window = tk.Toplevel(self)
+            label = ttk.Label(window, text='Fazendo backup da base de dados')
+            label.pack(padx=10, pady=10)
+            ttk.Button(window, text='Cancelar', command=self.close).pack(padx=10, pady=10)
+            self.backup_window(window, label)
             p = Popen(command, shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, env={'PGPASSWORD': self.pg_password})
             p.wait()
+            window.destroy()
             return True
         except:
             self.write2log('pg_dump não instalado, backup não efetuado!')
+            if window.winfo_exists():
+                window.destroy()
             window = tk.Toplevel(self)
             var = tk.BooleanVar()
             var.set(False)
@@ -306,6 +313,16 @@ class Oracle2Postgres(tk.Toplevel):
             self.wait_window(window)
             return var.get()
     
+    @threaded
+    # Pequena animação enquanto o backup ocorre
+    def backup_window(self, window, label):
+        while window.winfo_exists():
+            sleep(0.5)
+            if label.cget("text") == 'Fazendo backup da base de dados...':
+                label['text'] = 'Fazendo backup da base de dados'
+            else:
+                label['text'] += '.'
+
     # Restora ao estado antes do ETL
     def restore_from_backup(self, schema=None):
         if schema:
@@ -391,7 +408,7 @@ class Oracle2Postgres(tk.Toplevel):
                 if schema.lower() in self.pg_schemas:
                     self.schema_exists(schema)
                 else:
-                    self.migrate_schema(schema)
+                    self.migrate_schema_window(schema)
            # Migração de objetos
             else:
                 self.draw_table_selection_window(schema)
@@ -402,28 +419,48 @@ class Oracle2Postgres(tk.Toplevel):
     def schema_exists(self, schema):
         window = tk.Toplevel(self)
         ttk.Label(window, text=f'O schema {schema.lower()} já existe na base de dados\nDeseja substituilo?').pack(padx=20, pady=20)
-        ttk.Button(window, text='Sim', command=lambda:[self.migrate_schema(schema), window.destroy()]).pack(side='right', padx=20, pady=10)
+        ttk.Button(window, text='Sim', command=lambda:[self.migrate_schema_window(schema), window.destroy()]).pack(side='right', padx=20, pady=10)
         ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=10)
 
-    # Coleta objetos do schema a ser migrado e cria novo schema
-    def migrate_schema(self, schema):
+    def migrate_schema_window(self, schema):
+
+        query = f"SELECT name, type FROM all_source WHERE owner = '{schema}' \
+                UNION SELECT view_name, 'VIEW' FROM all_views WHERE owner = '{schema}' \
+                UNION SELECT table_name, 'TABLE' FROM all_tables WHERE owner = '{schema}'"
+        objects = self.execute_spark_query('ora', query)
+
         window = tk.Toplevel(self)
-        ttk.Label(window, text='Criando backup da base de dados...').pack(padx=20, pady=20)
-        ttk.Button(window, text='Cancelar', command=self.close).pack(padx=10, pady=10)
+        ttk.Label(window, text='Objetos sendo migrados:')
+        box_frame = ttk.Frame(window)
+        box_frame.pack()
+        scrollBar = tk.Scrollbar(box_frame, orient='vertical')
+        scrollBar.pack(side='right', fill='y')
+        textBox = tk.Text(box_frame, yscrollcommand=scrollBar.set, state='normal', height=10)
+        textBox.pack(pady=10)
+        for object in objects:
+            textBox.insert(tk.END, f'{object[0]}    {object[1]}\n')
+        scrollBar.config(command=textBox.yview)
+        textBox.config(state='disabled')
+        ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)
+        ttk.Button(window, text='Prosseguir', command=lambda:[self.migrate_schema(schema, objects), window.destroy()]).pack(side='right', padx=20, pady=20)
+
+    # Coleta objetos do schema a ser migrado e cria novo schema
+    def migrate_schema(self, schema, objects):
+
         self.create_backup()
-        window.destroy()
         
         cur = self.pg_conn.cursor()
         cur.execute(f'DROP SCHEMA IF EXISTS {schema.lower()} CASCADE')
         cur.execute(f'CREATE SCHEMA {schema.lower()}')
         cur.close()
         self.pg_schema = schema.lower()
-        query = f"SELECT table_name FROM all_tables WHERE owner = '{schema}'"
-        tables = self.execute_spark_query('ora', query)
-        tables = [[schema, tables[i]['TABLE_NAME']] for i in range(len(tables))]
-        query = f"SELECT name, type FROM all_source where owner = '{schema}' AND line = 1 UNION SELECT view_name, 'VIEW' FROM all_views where owner = '{schema.upper()}'"
-        sources = self.execute_spark_query('ora', query)
-        sources = [[schema, sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
+        tables = []
+        sources = []
+        for object in objects:
+            if object[1] == 'TABLE':
+                tables.append([schema, object[0]])
+            else:
+                sources.append([schema, object[0], object[1]])
         self.full_backup = True
         self.etl_initialization(tables, sources)
 
@@ -506,6 +543,7 @@ class Oracle2Postgres(tk.Toplevel):
                 textBox.insert(tk.END, '-' * 30 + '\n')
                 for db in dbs:
                     textBox.insert(tk.END, db['datname'] + '\n')
+            scrollBar.config(command=textBox.yview)
             textBox.config(state='disabled')
             ttk.Label(window, text='Você tem certeza que deseja prosseguir?').pack(padx=10, pady=10)
             ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=10)
@@ -538,11 +576,7 @@ class Oracle2Postgres(tk.Toplevel):
                 self.message_window(f'Usuário {self.pg_user} não tem permissão para criar banco de dados!')
                 return
             
-        window = tk.Toplevel(self)
-        ttk.Label(window, text='Criando backup da base de dados...').pack(padx=20, pady=20)
-        ttk.Button(window, text='Cancelar', command=self.close).pack(padx=10, pady=10)
         self.create_backup()
-        window.destroy()
 
         if new_user:
             if user.lower() in self.pg_users:
@@ -981,6 +1015,7 @@ class Oracle2Postgres(tk.Toplevel):
             else:
                 self.restore_from_backup(self.pg_schema)
             self.write2log('Base de dados retornada ao último estado estável')
+            print('Falha:')
             print(session.error_message)
         if self.full_backup:
             self.remove_backup()

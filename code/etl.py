@@ -144,7 +144,7 @@ class Oracle2PostgresETL(ETL_session_UI):
             # Executa extração de cada tabela/source em threads assincronas
             # O número no método define quantos objetos serão extraídos simultaneamente
             # Aumentar este valor fará o processo mais rápido mas poderá causar instabilidades
-            with ThreadPoolExecutor(1) as executor:
+            with ThreadPoolExecutor(5) as executor:
                 failures = []
                 for table in self.tables:
                     self.table_queue.put_nowait(table)
@@ -286,14 +286,16 @@ class Oracle2PostgresETL(ETL_session_UI):
             cur.execute(f"ALTER TABLE {self.pg_schema}.{table_name} ADD PRIMARY KEY {pk_columns}")
             if df['auto']:
                 last_val = df['data'].agg({df['auto']: 'max'}).collect()[0]
-                cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class AS cls \
-                            ON seq.seqrelid = cls.oid AND cls.relname = '{table_name}_{df['auto'].lower()}_seq'")
+                cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class cls \
+                            ON seq.seqrelid = cls.oid JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace \
+                            WHERE cls.relname = '{table_name}_{df['auto'].lower()}_seq' AND nsp.nspname = '{self.pg_schema}'")
                 res = cur.fetchall()
-                if len(res):
-                    cur.execute(f"DROP SEQUENCE {table_name}_{df['auto'].lower()}_seq CASCADE")
-                cur.execute(f'''CREATE SEQUENCE {table_name}_{df['auto'].lower()}_seq START WITH {int(last_val[f"max({df['auto']})"])}''')
-                cur.execute(f'''ALTER TABLE {self.pg_schema}.{table_name} ALTER COLUMN "{df['auto'].lower()}" SET DEFAULT nextval('{table_name}_{df['auto'].lower()}_seq')''')
-                cur.execute(f"ALTER SEQUENCE {table_name}_{df['auto'].lower()}_seq OWNER TO {self.pg_user}")
+                if len(res) == 0:
+                    cur.execute(f'''CREATE SEQUENCE {self.pg_schema}.{table_name}_{df['auto'].lower()}_seq START WITH {int(last_val[f"max({df['auto']})"]) + 1}''')
+                else:
+                    cur.execute(f'''ALTER SEQUENCE {self.pg_schema}.{table_name}_{df['auto'].lower()}_seq RESTART WITH {int(last_val[f"max({df['auto']})"]) + 1}''')
+                cur.execute(f'''ALTER TABLE {self.pg_schema}.{table_name} ALTER COLUMN "{df['auto'].lower()}" SET DEFAULT nextval('{self.pg_schema}.{table_name}_{df['auto'].lower()}_seq')''')
+                cur.execute(f"ALTER SEQUENCE {self.pg_schema}.{table_name}_{df['auto'].lower()}_seq OWNER TO {self.pg_user}")
         except Exception as e:
             self.write2display(f"Carregamento da tabela {table_name} falhou!\nObjetos dependentes não serão migrados!")
             print(e)
@@ -371,20 +373,21 @@ class Oracle2PostgresETL(ETL_session_UI):
             increment = res[0][1]
             cur.close()
             cur = self.pg_conn.cursor()
-            cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class AS cls \
-                ON seq.seqrelid = cls.oid AND cls.relname = '{name.lower()}'")
+            cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class cls \
+                ON seq.seqrelid = cls.oid JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace \
+                WHERE cls.relname = '{name.lower()}' AND nsp.nspname = '{self.pg_schema}'")
             res = cur.fetchall()
             if len(res):
-                cur.execute(f"DROP SEQUENCE {name.lower()} CASCADE")
-            cur.execute(f"CREATE SEQUENCE {name.lower()} INCREMENT BY {increment} START WITH {last_val}")
-            self.write2display(f'Sequence {name.lower()} inserido no Postgres!')
+                cur.execute(f"DROP SEQUENCE {self.pg_schema}.{name.lower()} CASCADE")
+            cur.execute(f"CREATE SEQUENCE {self.pg_schema}.{name.lower()} INCREMENT BY {increment} START WITH {last_val}")
+            self.write2display(f'Sequence {self.pg_schema}.{name.lower()} inserido no Postgres!')
             return ['done', data, None]
         if type == 'VIEW':
             query = f"SELECT text FROM all_views WHERE owner = '{owner}' AND view_name = '{name}'"
         else:
             query = f"SELECT text, line FROM all_source WHERE owner = '{owner}' AND name = '{name}' ORDER BY line"
         source = self.execute_spark_query('ora', query)
-        query = f"SELECT referenced_name, referenced_type FROM all_dependencies WHERE owner = '{owner}' AND name = '{name}' AND referenced_type in ('PROCEDURE', 'FUNCTION', 'VIEW')"
+        query = f"SELECT referenced_name, referenced_type FROM all_dependencies WHERE owner = '{owner}' AND name = '{name}' AND referenced_type in ('PROCEDURE', 'FUNCTION', 'VIEW', 'SEQUENCE')"
         dependencies = self.execute_spark_query('ora', query)
         if type == 'VIEW':
             source_body = [f"{self.normalize_name(name)} AS {source[0]['TEXT']}"]
@@ -407,7 +410,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                 if '"' in name[i]:
                     name[i] = name[i].removeprefix('"')
                     name[i] = name[i].removesuffix('"')
-            if name[0].lower() != self.pg_schema:
+            if name[0].lower() not in [self.pg_schema, 'public']:
                 return None
             return name[1].lower()
         elif '"' in name:
@@ -429,7 +432,7 @@ class Oracle2PostgresETL(ETL_session_UI):
             if began and ('select' in tokens[i].lower() or 'insert' in tokens[i].lower()):
                 aux = i
                 while ')' not in tokens[aux].lower() and aux < len(tokens) - 1:
-                    if tokens[aux].lower() in ['from', 'into', 'join']:
+                    if tokens[aux].lower() in ['from', 'join']:
                         aux += 1
                         query = f"SELECT owner FROM all_views WHERE view_name = '{tokens[i].upper()}'"
                         is_view = self.execute_spark_query('ora', query)
@@ -437,7 +440,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                             if is_view[0]['OWNER'] == 'SYS':
                                 # Referencia a meta view, não traduzível!
                                 return False    
-                        if self.pg_schema.lower() != 'public':
+                        if self.pg_schema.lower() != 'public' and 'dual' not in tokens[aux]:
                             tokens[aux] = f'{self.pg_schema}.{tokens[aux]}'
                     aux += 1
             if tokens[i].lower() in ['in', 'out', 'in out'] and not began:
@@ -545,13 +548,16 @@ class Oracle2PostgresETL(ETL_session_UI):
 
     # Postgresql só executa trigger com chamada de função, cria um trigger com a função apropriada
     def create_trigger_function(self, data, name, attributes = None):
-        fn_name = f"fn_{name}"
-        func_body = f"CREATE OR REPLACE FUNCTION {self.pg_schema}.{fn_name}() RETURNS TRIGGER LANGUAGE PLPGSQL AS \n$$\n"
-        for i, token in enumerate(data):
+        if self.pg_schema != 'public':
+            fn_name = f"{self.pg_schema}.fn_{name}"
+        else:
+            fn_name = f"fn_{name}"
+        func_body = f"CREATE OR REPLACE FUNCTION {fn_name}() RETURNS TRIGGER LANGUAGE PLPGSQL AS \n$$\n"
+        for i in range(len(data)):
             if i == 0:
                 # Funções de trigger no postgres não podem receber parâmetros diretamente
                 # Força inicialização de parâmetros na área de declarações
-                if 'declare' in token.lower():
+                if 'declare' in data[i].lower():
                     func_body += 'DECLARE\n'
                     if attributes:
                         k = 0
@@ -559,19 +565,22 @@ class Oracle2PostgresETL(ETL_session_UI):
                             func_body += f"{name} {type} := TG_ARGV[{k}];\n"
                             k += 1
                     continue
-            if token.lower() == 'from':
+            if data[i].lower() == 'from':
                 if data[i+1].lower() == 'dual;':
                     func_body += ';'
                     continue
-            if token.lower() == 'dual;':
+            if data[i].lower() == 'dual;':
                 continue
-            if token.lower() in ['exception', 'end', 'end;']:
+            if data[i].lower() == 'on':
+                if self.pg_schema != 'public':
+                    data[i+1] = f"{self.pg_schema}.{data[i+1]}"
+            if data[i].lower() in ['exception', 'end', 'end;']:
                 func_body += 'RETURN NEW;\n'
                 break
-            if token[-1] == ';' or token.lower() == 'begin':
-                func_body += f'{token}\n'
+            if data[i][-1] == ';' or data[i].lower() == 'begin':
+                func_body += f'{data[i]}\n'
             else:
-                func_body += token + ' '
+                func_body += data[i] + ' '
         func_body += '\nEND;\n$$;'
         cur = self.pg_conn.cursor()
         cur.execute(func_body)
@@ -581,7 +590,6 @@ class Oracle2PostgresETL(ETL_session_UI):
 
     # Cria uma função de trigger baseada em uma função/procedure genérica
     def adapt2trig(self, source_name):
-        self.write2display(f'Adaptando função {source_name} em trigger...')
         query = f"SELECT text FROM all_source WHERE owner = '{self.user}' AND name = '{source_name.upper()}' ORDER BY line"
         data = self.execute_spark_query('ora', query)
         data_body = [data[i]['TEXT'] for i in range(len(data))]
@@ -689,6 +697,8 @@ class Oracle2PostgresETL(ETL_session_UI):
                     if not self.normalize_name(tokens[i+1]):
                         return 'failed'
                     data_aux['trig_ref'] = tokens[i+1]
+                    if self.pg_schema != 'public':
+                        tokens[i+1] = f'{self.pg_schema}.{tokens[i+1]}'
                     source_body += '\n'
                 if tokens[i].lower() == 'declare' or tokens[i].lower() == 'begin':
                     # Pl/sql block trigger
@@ -696,7 +706,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                     # Adapta bloco pl/sql em trigger_function compatível com Postgres
                     func = self.create_trigger_function(block_data, source_name)
                     data_aux['trig_func'] = func
-                    source_body += f"EXECUTE FUNCTION {self.pg_schema}.{func}();"
+                    source_body += f"EXECUTE FUNCTION {func}();"
                     break
                 # Function call trigger
                 if tokens[i].lower() == 'call':
@@ -712,7 +722,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                     if func == 'failed':
                         return 'failed'
                     data_aux['trig_func'] = func
-                    source_body += f"EXECUTE FUNCTION {self.pg_schema}.{func}"
+                    source_body += f"EXECUTE FUNCTION {func}"
                     continue
                 if i == len(tokens) - 1:
                     source_body += tokens[i] + ';'
@@ -772,13 +782,13 @@ class Oracle2PostgresETL(ETL_session_UI):
             source_body += "EXCEPTION WHEN OTHERS THEN\nraise notice 'Transaction has failed and rolledback!';\nraise notice '% %', SQLERRM, SQLSTATE;"
             source_body += "\nEND;\n$$;"
         elif type == 'VIEW':
-            for token in tokens[1:]:
-                if '"' in token:
-                    if ',' in token:
-                        if token[-1] == ',':
-                            token = token[:-1]
+            for i in range(1, len(tokens)):
+                if '"' in tokens[i]:
+                    if ',' in tokens[i]:
+                        if tokens[i][-1] == ',':
+                            tokens[i] = tokens[i][:-1]
                         else:
-                            aux_token = token.split(',')
+                            aux_token = tokens[i].split(',')
                             for i, sub_token in enumerate(aux_token):
                                 if '"' in sub_token:
                                     sub_token = sub_token.removeprefix('"')
@@ -787,9 +797,14 @@ class Oracle2PostgresETL(ETL_session_UI):
                                     sub_token += ','
                                 source_body += sub_token + ' '
                             continue
-                    token = token.removeprefix('"')
-                    token = token.removesuffix('"')
-                source_body += token + ' '
+                    tokens[i] = tokens[i].removeprefix('"')
+                    tokens[i] = tokens[i].removesuffix('"')
+                if tokens[i].lower() == 'from':
+                    print('found from')
+                    if self.pg_schema != 'public':
+                        print('replacing...')
+                        tokens[i+1] = f'{self.pg_schema}.{tokens[i+1]}'
+                source_body += tokens[i] + ' '
         cur = self.pg_conn.cursor()
         if factory_func:
             self.write2display(f"Função {source_name} detectada como factory, não é possível garantir o funcionamento da migração\nFunção {source_name} sera adicionada na pasta manual_migrations para migração manual!")
@@ -824,7 +839,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                 cur.execute(f"SELECT tg.tgname FROM pg_proc AS pc \
                             JOIN pg_trigger AS tg ON pc.oid = tg.tgfoid \
                             JOIN pg_namespace AS ns ON pc.pronamespace = ns.oid \
-                            WHERE ns.nspname = '{self.pg_schema}' AND pc.proname = '{data['trig_func']}'")
+                            WHERE ns.nspname = '{self.pg_schema}' AND pc.proname = '{self.normalize_name(data['trig_func'])}'")
                 res = cur.fetchall()
                 res = [res[i][0] for i in range(len(res))]
                 if name not in res:
@@ -862,13 +877,14 @@ class Oracle2PostgresETL(ETL_session_UI):
                     cur.close()
                     return 'failed'
                 # Testa query na view
-                cur.execute(f"SELECT * FROM {name} limit 1")
+                cur.execute(f"SELECT * FROM {self.pg_schema}.{name} limit 1")
                 res = cur.fetchall()
             cur.close()
             self.write2display(f'testes no {type} {name} concluídos sem problemas!')
             return 'done'
-        except:
+        except Exception as e:
             self.write2display(f'Falha na tradução do plsql para o {type} {name}! :( )')
+            self.write2log('Error ' + str(e))
             cur.close()
             return 'failed'
         
