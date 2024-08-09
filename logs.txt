@@ -43,3 +43,9 @@
 08/08/2024 13:12:44 Sessão 8753523893265: Migração concluída com sucesso!
 08/08/2024 13:12:44 Sessão 8753523893265: Terminada sessão de ETL 8753388992025
 08/08/2024 13:16:43 Sessão 8728772173837: Iniciando sessão 8728637517809 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+09/08/2024 09:58:30 Sessão 8769785919817: Iniciando sessão 8769731841913 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+09/08/2024 09:59:17 Sessão 8769785919817: Criando backup do schema public
+09/08/2024 09:59:17 Sessão 8769785919817: Iniciando sessão 8769731841913 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+09/08/2024 09:59:17 Sessão 8769785919817: migrando tabelas [['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+09/08/2024 09:59:24 Sessão 8769785919817: Migração concluída com sucesso!
+09/08/2024 09:59:24 Sessão 8769785919817: Terminada sessão de ETL 8769731841789

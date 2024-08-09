@@ -22,10 +22,11 @@ def threaded(func):
         return threading.Thread(target=func, args=args, kwargs=kwargs, daemon=True).start()
     return wrapper
 
-def make_txt_file(name, body):
+def make_txt_file(name, body, error=None):
     FILE_PATH = os.path.join(APP_HOME, f'manual_migrations/{name}.txt')
     with open(FILE_PATH, "w") as file:
         file.write(body)
+        file.write('Problema: ' + str(error))
         file.close()
 
 class ETL_session_UI(tk.Toplevel):
@@ -37,7 +38,7 @@ class ETL_session_UI(tk.Toplevel):
     S = threading.Semaphore()
     _state = 'idle'
 
-    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema):
+    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, postprocess):
         try:
             super().__init__(master)
             self.protocol('WM_DELETE_WINDOW', self.stop_etl)
@@ -58,6 +59,7 @@ class ETL_session_UI(tk.Toplevel):
             self.etl = etl
             self.pg_schema = schema
             self.master = master
+            self.postprocess = postprocess
             # Conexões genéricas para execução de DML/DDL (PySpark apenas executa queries para coleta de dados)
             # (auto-commit ON, usar a função commit() ou fetch() em operações DML/DDL causará erro,
             #  operações DML/DDL executadas seram aplicadas na base de dados automaticamente!)
@@ -117,6 +119,54 @@ class ETL_session_UI(tk.Toplevel):
 class Oracle2PostgresETL(ETL_session_UI):
     def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema):
         super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema)
+
+    def post_processing(self):
+        cur = self.pg_conn.cursor()
+        for db in self.postprocess['delete_database']:
+            try:
+                cur.execute(f'DROP DATABASE {db} WITH (FORCE)')
+            except:
+                window = tk.Toplevel(self.master)
+                ttk.Label(window, text=f'Database {db} tem sessões abertas, feche todas as sessões e tente novamente!').pack(padx=20, pady=20)
+                ttk.Button(window, text='Ok', command=window.destroy).pack(padx=20, pady=20)
+                return 'failed'
+        if self.postprocess['create_database']:
+            cur.execute(f'CREATE DATABASE {self.postprocess['create_database']}')
+        if self.postprocess['owner_database']:
+            owner = self.postprocess['owner_database']
+            cur.execute(f'GRANT CONNECT ON DATABASE {owner[0]} TO {owner[1]}')
+            cur.execute(f'ALTER DATABASE {owner[0]} OWNER TO {owner[1]}')
+        if self.postprocess['delete_user']:
+            user = self.postprocess['delete_user']
+            cur.execute(f'DROP OWNED BY {user} CASCADE')
+            cur.execute(f'DROP USER {user}')
+        if self.postprocess['create_superuser']:
+            user = self.postprocess['create_superuser'][0]
+            password = self.postprocess['create_superuser'][1]
+            cur.execute(f'CREATE SUPERUSER {user} IDENTIFIED BY {password}')
+        elif self.postprocess['create_user']:
+            user = self.postprocess['create_user'][0]
+            password = self.postprocess['create_user'][1]
+            cur.execute(f'CREATE USER {user} IDENTIFIED BY {password}')
+        if self.postprocess['connect']:
+            self.pg_url =  self.postprocess['connect']['url']
+            self.pg_user =  self.postprocess['connect']['user']
+            self.pg_password =  self.postprocess['connect']['password']
+            self.pg_database =  self.postprocess['connect']['database']
+            cur.close()
+            self.pg_conn = jaydebeapi.connect(self.pg_driver, self.pg_url, [self.pg_user, self.pg_password], self.pg_jar)
+            cur = self.pg_conn.cursor()
+        if self.postprocess['create_schema']:
+            schema = self.postprocess['create_schema']
+            cur.execute(f'DROP SCHEMA IF EXISTS {schema} CASCADE')
+            cur.execute(f'CREATE SCHEMA {schema}')
+            self.write2log(f'Criado schema {schema} no database {self.pg_database}')
+        if self.postprocess['owner_schema']:
+            owner = self.postprocess['owner_schema']
+            cur.execute(f'GRANT USAGE ON SCHEMA {owner[0]} TO {owner[1]}')
+            cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA {owner[0]} GRANT ALL PRIVILEGES ON TABLES TO {owner[1]}')
+            cur.execute(f'ALTER SCHEMA {owner[0]} OWNER TO {owner[1]}')
+        cur.close()
 
     # Começa a extrair os dados das tabelas do cluster cujo foi estabelecida a conexão
     @threaded
@@ -546,7 +596,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                 self.transform_system_function(tokens)
                 break
 
-    # Postgresql só executa trigger com chamada de função, cria um trigger com a função apropriada
+    # Postgresql só executa trigger com chamada de função, isso cria um trigger com a função apropriada
     def create_trigger_function(self, data, name, attributes = None):
         if self.pg_schema != 'public':
             fn_name = f"{self.pg_schema}.fn_{name}"
@@ -565,6 +615,8 @@ class Oracle2PostgresETL(ETL_session_UI):
                             func_body += f"{name} {type} := TG_ARGV[{k}];\n"
                             k += 1
                     continue
+            if 'DBMS_' in data[i]:
+                return data[i]
             if data[i].lower() == 'from':
                 if data[i+1].lower() == 'dual;':
                     func_body += ';'
@@ -705,6 +757,8 @@ class Oracle2PostgresETL(ETL_session_UI):
                     block_data = tokens[i:]
                     # Adapta bloco pl/sql em trigger_function compatível com Postgres
                     func = self.create_trigger_function(block_data, source_name)
+                    if 'DBMS_' in data[i]:
+                        unsupported = func
                     data_aux['trig_func'] = func
                     source_body += f"EXECUTE FUNCTION {func}();"
                     break
@@ -731,6 +785,7 @@ class Oracle2PostgresETL(ETL_session_UI):
         elif type in ['FUNCTION', 'PROCEDURE']:
             i = 2
             while i < len(tokens):
+                # Caso encontre chamada a DBMS, significa que uma system call não foi traduzida
                 if 'DBMS_' in tokens[i]:
                     unsupported = tokens[i]
                 if tokens[i].lower() == 'return':
@@ -748,6 +803,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                     cursor = tokens[i-1]
                 if tokens[i].lower() in ['is', 'as']:
                     source_body += '\nLANGUAGE PLPGSQL AS\n$$\nDECLARE\n'
+                    # Checa de o looper referencia o cursor, caso não, define o loop como record
                     if looper and looper != cursor:
                         source_body += f'{looper} record;\n'
                     i += 1
@@ -783,6 +839,7 @@ class Oracle2PostgresETL(ETL_session_UI):
             source_body += "\nEND;\n$$;"
         elif type == 'VIEW':
             for i in range(1, len(tokens)):
+                # Remove aspas dos parametros da view, separa parametros concatenados e adiciona schema
                 if '"' in tokens[i]:
                     if ',' in tokens[i]:
                         if tokens[i][-1] == ',':
@@ -800,19 +857,17 @@ class Oracle2PostgresETL(ETL_session_UI):
                     tokens[i] = tokens[i].removeprefix('"')
                     tokens[i] = tokens[i].removesuffix('"')
                 if tokens[i].lower() == 'from':
-                    print('found from')
                     if self.pg_schema != 'public':
-                        print('replacing...')
                         tokens[i+1] = f'{self.pg_schema}.{tokens[i+1]}'
                 source_body += tokens[i] + ' '
         cur = self.pg_conn.cursor()
         if factory_func:
             self.write2display(f"Função {source_name} detectada como factory, não é possível garantir o funcionamento da migração\nFunção {source_name} sera adicionada na pasta manual_migrations para migração manual!")
-            make_txt_file(source_name, source_body)
+            make_txt_file(source_name, source_body, 'Função tipo factory')
             return 'failed'
         if unsupported:
             self.write2display(f"Função de sistema não suportada detectada em {source_name}\n{source_name} será adicionado em manual_migrations para migração manual!")
-            make_txt_file(source_name, source_body)
+            make_txt_file(source_name, source_body, f'Função {unsupported} não suportada pelo aplicativo')
             return 'failed'
         if source_name in self.pg_source:
             self.write2display(f'Substituindo {type} {source_name} no Postgresql...')
@@ -826,7 +881,7 @@ class Oracle2PostgresETL(ETL_session_UI):
             return self.test_source(data_aux, source_name, type)
         except Exception as e:
             self.write2display(f'Algo deu errado na tradução do {type} {source_name}! Adicionado para migração manual!')
-            make_txt_file(source_name, source_body)
+            make_txt_file(source_name, source_body, e)
             print(f'Error: ' + str(e))
 
     # Testa se a tradução do plsql ocorreu sem erros
