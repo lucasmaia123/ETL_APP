@@ -66,7 +66,6 @@ class etl_UI(tk.Frame):
             child.destroy()
         super().__init__(self.master)
         self.pack()
-        self.master.geometry('800x600')
 
         upper_frame = ttk.Frame(self)
         upper_frame.pack(side='top', expand=True, fill='x')
@@ -74,8 +73,6 @@ class etl_UI(tk.Frame):
         middle_frame.pack(fill='x')
         lower_frame = ttk.Frame(self)
         lower_frame.pack(fill='x', pady=30)
-        label_frame = ttk.Frame(self)
-        label_frame.pack(side='bottom', fill='x')
 
         self.conn_mode = tk.StringVar()
 
@@ -103,6 +100,8 @@ class etl_UI(tk.Frame):
         self.ora_SID_mode.grid(row=11, column=0, padx=10)
         self.ora_SID_entry = ttk.Entry(middle_frame, width=30)
         self.ora_SID_entry.grid(row=11, column=1, padx=10)
+
+        ttk.Button(middle_frame, text='Criar script Oracle -> Postgres').grid(row=12, column=1, padx=10, pady=10)
 
         self.ora_service_mode.config(command=lambda:[self.ora_service_entry.config(state='normal'), self.ora_SID_entry.config(state='disabled')])
         self.ora_SID_mode.config(command=lambda:[self.ora_service_entry.config(state='disabled'), self.ora_SID_entry.config(state='normal')])
@@ -135,13 +134,13 @@ class etl_UI(tk.Frame):
 
         Oracle2PostgresButton.invoke()
 
-        test_button = ttk.Button(lower_frame, text='Testar conexão')
-        test_button.pack(side='left')
-        next_button = ttk.Button(lower_frame, text='Prosseguir')
-        next_button.pack(side='right')
+        response_label = ttk.Label(lower_frame, text='')
+        response_label.pack(padx=10, pady=10)
 
-        response_label = ttk.Label(label_frame, text='')
-        response_label.grid(row=6, column=0)
+        test_button = ttk.Button(lower_frame, text='Testar conexão')
+        test_button.pack(side='left', padx=10, pady=10)
+        next_button = ttk.Button(lower_frame, text='Prosseguir com conexão direta')
+        next_button.pack(side='right', padx=10, pady=10)
 
         test_button.config(command=lambda: self.initialize_conn(response_label, True))
         next_button.config(command=lambda: self.initialize_conn(response_label))
@@ -167,12 +166,14 @@ class etl_UI(tk.Frame):
         self.pg_password = self.pg_password_entry.get()
         self.pg_database = self.pg_database_entry.get()
 
-        if '' in [self.ora_host, self.ora_port, self.ora_user, self.ora_password, self.pg_host, self.pg_port, self.pg_user, self.pg_password, self.pg_database]:
+        if '' in [self.ora_host, self.ora_port, self.ora_user, self.ora_password, self.ora_service] and '' in [self.pg_host, self.pg_port, self.pg_user, self.pg_password, self.pg_database]:
             response.config(text='Preencha todos os parâmetros de conexão!')
             return
 
+        conns = self.conn_test(response)
+
         # Estabelece conexão ou apenas testa 
-        if self.conn_test(response) and not test:
+        if conns and not test:
             response.config(text='Conectando...')
             self.update()
             # Inicializa uma sessão do pyspark para começar a migração
@@ -211,27 +212,36 @@ class etl_UI(tk.Frame):
 
     # Testa as credenciais de conexão fornecidas
     def conn_test(self, output):
+        response = ''
+        conn = []
+        try:
+            # Estabelece conexão genêrica
+            self.pg_url = f"jdbc:postgresql://{self.pg_host}:{self.pg_port}/{self.pg_database}"
+            if self.pg_conn != None:
+                self.pg_conn.close()
+            self.pg_conn = jaydebeapi.connect(self.pg_driver, self.pg_url, [self.pg_user, self.pg_password], self.pg_jar)
+            response = response + 'Conexão estabelecida com Postgres!\n'
+            conn.append(True)
+        except:
+            response = 'Conexão falhou com Postgres!\n'
+            conn.append(False)
         try:
             if self.ora_user.lower() == 'sys':
                 self.ora_user = 'sys as sysdba'
-            # Estabelece conexão genêrica
-            self.pg_url = f"jdbc:postgresql://{self.pg_host}:{self.pg_port}/{self.pg_database}"
             if self.conn_mode.get() == 'name':
                 self.ora_url = f"jdbc:oracle:thin:@//{self.ora_host}:{self.ora_port}/{self.ora_service}"
             if self.conn_mode.get() == 'SID':
                 self.ora_url = f"jdbc:oracle:thin:@{self.ora_host}:{self.ora_port}:{self.ora_service}"
-            if self.pg_conn != None:
-                self.pg_conn.close()
-            self.pg_conn = jaydebeapi.connect(self.pg_driver, self.pg_url, [self.pg_user, self.pg_password], self.pg_jar)
             if self.ora_conn != None:
                 self.ora_conn.close()
             self.ora_conn = jaydebeapi.connect(self.ora_driver, self.ora_url, [self.ora_user, self.ora_password], self.ora_jar)
-            output.config(text='Conexão estabelecida com sucesso!')
-            return True
-        except Exception as e:
-            output.config(text='Conexão falhou!\nVerifique se as suas credenciais estão corretas!')
-            print('Error: ' + str(e))
-            return False
+            response = response + 'Conexão estabelecida com Oracle!'
+            conn.append(True)
+        except:
+            response = response + 'Conexão falhou com Oracle!'
+            conn.append(False)
+        output.config(text=response)
+        return conn
 
     # Ferramenta para mensagem de erros
     def message_window(self, message):
@@ -305,11 +315,11 @@ class Oracle2Postgres(tk.Toplevel):
             else:
                 BACKUP_FILE = os.path.join(APP_HOME, f'backups/{self.pg_database}_database_backup.dmp')
                 command = f"pg_dump --no-password -h {self.pg_host} -p {self.pg_port} -d {self.pg_database} -U {self.pg_user} -Fc -f {BACKUP_FILE}"
-            self.animated_window = tk.Toplevel(self)
-            self.animated_label = ttk.Label(window, text='Fazendo backup da base de dados')
-            self.animated_label.pack(padx=10, pady=10)
+            window = tk.Toplevel(self)
+            label = ttk.Label(window, text='Fazendo backup da base de dados')
+            label.pack(padx=10, pady=10)
             ttk.Button(window, text='Cancelar', command=self.close).pack(padx=10, pady=10)
-            self.backup_window()
+            self.backup_window(window, label)
             sleep(0.5)
             p = Popen(command, shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, env={'PGPASSWORD': self.pg_password})
             p.wait()
@@ -317,8 +327,8 @@ class Oracle2Postgres(tk.Toplevel):
             return True
         except:
             self.write2log('pg_dump não instalado, backup não efetuado!')
-            if self.animated_window.winfo_exists():
-                self.animated_window.destroy()
+            if self.window.winfo_exists():
+                self.window.destroy()
             window = tk.Toplevel(self)
             var = tk.BooleanVar()
             var.set(False)
@@ -330,13 +340,13 @@ class Oracle2Postgres(tk.Toplevel):
     
     @threaded
     # Pequena animação enquanto o backup ocorre
-    def backup_window(self):
-        while self.animated_window.winfo_exists():
+    def backup_window(self, window, label):
+        while window.winfo_exists():
             sleep(0.5)
-            if self.animated_label.cget("text") == 'Fazendo backup da base de dados...':
-                self.animated_label['text'] = 'Fazendo backup da base de dados'
+            if label.cget("text") == 'Fazendo backup da base de dados...':
+                label['text'] = 'Fazendo backup da base de dados'
             else:
-                self.animated_label['text'] += '.'
+                label['text'] += '.'
 
     # Restora ao estado antes do ETL
     def restore_from_backup(self, schema=None):
@@ -799,7 +809,7 @@ class Oracle2Postgres(tk.Toplevel):
         for table in aux_table:
             # Se tabela já existe e não está marcada para substituição, remove da migração
             if table[1].lower() in pg_tables and table[1] not in override_tables:
-                tables.remove([self.user, table])
+                tables.remove(table)
         self.source_selection_window(tables, s_mode)
 
     # Idem com seleção de tabelas, mas agora para procedimentos guardados
@@ -819,12 +829,14 @@ class Oracle2Postgres(tk.Toplevel):
 
             # Migra procedimentos relacionados
             if s_mode.get() == 0:
+                sources = []
                 for table in tables:
-                    query = f"SELECT DISTINCT owner, name, type FROM all_dependencies WHERE referenced_name = '{table[1]}' AND owner = '{self.user}'"
-                    sources = self.execute_spark_query('ora', query)
-                    sources = [[sources[i]['OWNER'], sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
-                for source in sources:
-                    textbox.insert(tk.END, f'{source[0]}.{source[1]}    {source[2]}\n')
+                    query = f"SELECT DISTINCT owner, name, type FROM all_dependencies WHERE referenced_name = '{table[1]}' AND owner = '{table[0]}'"
+                    dependencies = self.execute_spark_query('ora', query)
+                    for i in range(len(dependencies)):
+                        sources.append([dependencies[i]['OWNER'], dependencies[i]['NAME'], dependencies[i]['TYPE']])
+                        self.deleted_objects.append([dependencies[i]['OWNER'], dependencies[i]['NAME'], dependencies[i]['TYPE']])
+                        textbox.insert(tk.END, f"{dependencies[i]['OWNER']}.{dependencies[i]['NAME']}    {dependencies[i]['TYPE']}\n")
             
             # Migra todos os procedimentos
             elif s_mode.get() == 1:
@@ -949,7 +961,7 @@ class Oracle2Postgres(tk.Toplevel):
                 for dep in dependencies:
                     if dep[2] == 'TABLE':
                         if [dep[0], dep[1]] not in tables:
-                            dep_tables.add([dep[0], dep[1]])
+                            dep_tables.add((dep[0], dep[1]))
                     elif dep[2] == 'SEQUENCE' and dep not in selected_sources:
                         selected_sources.append(dep)
                     elif dep not in selected_sources:
@@ -964,7 +976,8 @@ class Oracle2Postgres(tk.Toplevel):
             for table in pg_tables:
                 if [self.pg_schema, table['table_name']] in tables:
                     self.deleted_objects.append([self.pg_schema, table['table_name'], 'TABLE'])
-            for source in sources:
+            # Adiciona sources já existentes na base alvo para a lista de objetos removidos
+            for source in selected_sources:
                 query = f"select proname, 'PROC/FUNC' as type from pg_proc where proname = '{source[1]}' \
                         union select viewname, 'VIEW' from pg_views where viewname = '{source[1]}' \
                         union select tgname, 'TRIGGER' from pg_trigger where tgname = '{source[1]}'"
@@ -1009,11 +1022,11 @@ class Oracle2Postgres(tk.Toplevel):
         added_info.config(height=20, width=50)
         added_info.pack(padx=10, pady=10)
         if self.postprocess['create_database']:
-            added_info.insert(tk.END, f'Cria novo database {self.postprocess['create_database']}\n')
+            added_info.insert(tk.END, f"Cria novo database {self.postprocess['create_database']}\n")
         for schema in self.postprocess['create_schema']:
             added_info.insert(tk.END, f'Cria novo schema {schema}\n')
         if self.postprocess['create_user']:
-            added_info.insert(tk.END, f'Cria novo usuário {self.postprocess['create_user']}\n')
+            added_info.insert(tk.END, f"Cria novo usuário {self.postprocess['create_user']}\n")
         for table in tables:
             added_info.insert(tk.END, f'Tabela {table[0]}.{table[1]} Oracle -> {self.pg_schema}.{table[1]} Postgres\n')
         for source in sources:
@@ -1028,7 +1041,7 @@ class Oracle2Postgres(tk.Toplevel):
             for schema in self.postprocess['delete_schema']:
                 dropped_info.insert(tk.END, f'Remove schema {schema}\n')
             if self.postprocess['delete_user']:
-                dropped_info.insert(tk.END, f'Deleta usuário {self.postprocess['create_user']}\n')
+                dropped_info.insert(tk.END, f"Deleta usuário {self.postprocess['create_user']}\n")
             for object in self.deleted_objects:
                 dropped_info.insert(tk.END, f'Substitui/remove {object[2]} {object[0]}.{object[1]}\n')
         ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)

@@ -131,7 +131,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                 ttk.Button(window, text='Ok', command=window.destroy).pack(padx=20, pady=20)
                 return 'failed'
         if self.postprocess['create_database']:
-            cur.execute(f'CREATE DATABASE {self.postprocess['create_database']}')
+            cur.execute(f"CREATE DATABASE {self.postprocess['create_database']}")
         if self.postprocess['owner_database']:
             owner = self.postprocess['owner_database']
             cur.execute(f'GRANT CONNECT ON DATABASE {owner[0]} TO {owner[1]}')
@@ -194,7 +194,7 @@ class Oracle2PostgresETL(ETL_session_UI):
             # Executa extração de cada tabela/source em threads assincronas
             # O número no método define quantos objetos serão extraídos simultaneamente
             # Aumentar este valor fará o processo mais rápido mas poderá causar instabilidades
-            with ThreadPoolExecutor(5) as executor:
+            with ThreadPoolExecutor(1) as executor:
                 failures = []
                 for table in self.tables:
                     self.table_queue.put_nowait(table)
@@ -419,19 +419,22 @@ class Oracle2PostgresETL(ETL_session_UI):
             cur = self.oracle_conn.cursor()
             cur.execute(f"select last_number, increment_by from all_sequences where sequence_owner = '{owner}' and sequence_name = '{name}'")
             res = cur.fetchall()
-            last_val = res[0][0] + 1
-            increment = res[0][1]
-            cur.close()
-            cur = self.pg_conn.cursor()
-            cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class cls \
-                ON seq.seqrelid = cls.oid JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace \
-                WHERE cls.relname = '{name.lower()}' AND nsp.nspname = '{self.pg_schema}'")
-            res = cur.fetchall()
-            if len(res):
-                cur.execute(f"DROP SEQUENCE {self.pg_schema}.{name.lower()} CASCADE")
-            cur.execute(f"CREATE SEQUENCE {self.pg_schema}.{name.lower()} INCREMENT BY {increment} START WITH {last_val}")
-            self.write2display(f'Sequence {self.pg_schema}.{name.lower()} inserido no Postgres!')
-            return ['done', data, None]
+            if len(res) > 0:
+                last_val = res[0][0] + 1
+                increment = res[0][1]
+                cur.close()
+                cur = self.pg_conn.cursor()
+                cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class cls \
+                    ON seq.seqrelid = cls.oid JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace \
+                    WHERE cls.relname = '{name.lower()}' AND nsp.nspname = '{self.pg_schema}'")
+                res = cur.fetchall()
+                if len(res):
+                    cur.execute(f"DROP SEQUENCE {self.pg_schema}.{name.lower()} CASCADE")
+                cur.execute(f"CREATE SEQUENCE {self.pg_schema}.{name.lower()} INCREMENT BY {increment} START WITH {last_val}")
+                self.write2display(f'Sequence {self.pg_schema}.{name.lower()} inserido no Postgres!')
+                return ['done', data, None]
+            else:
+                return ['failed', data, None]
         if type == 'VIEW':
             query = f"SELECT text FROM all_views WHERE owner = '{owner}' AND view_name = '{name}'"
         else:
@@ -741,7 +744,8 @@ class Oracle2PostgresETL(ETL_session_UI):
         unsupported = None
         data_aux = {}
         if type == 'TRIGGER':
-            for i in range(2, len(tokens)):
+            i = 2
+            while i < len(tokens):
                 # Procura função do sistema que não foi transformada
                 if 'DBMS_' in tokens[i]:
                     unsupported = tokens[i]
@@ -757,7 +761,7 @@ class Oracle2PostgresETL(ETL_session_UI):
                     block_data = tokens[i:]
                     # Adapta bloco pl/sql em trigger_function compatível com Postgres
                     func = self.create_trigger_function(block_data, source_name)
-                    if 'DBMS_' in data[i]:
+                    if 'DBMS_' in func:
                         unsupported = func
                     data_aux['trig_func'] = func
                     source_body += f"EXECUTE FUNCTION {func}();"
@@ -770,18 +774,22 @@ class Oracle2PostgresETL(ETL_session_UI):
                         tokens[i+1] = tokens[i+1][tokens[i+1].index('('):]
                     else:
                         name = tokens[i+1]
-                        tokens.remove(tokens[i+1])
+                        tokens.pop(i+1)
                     # Coleta corpo da função e adapta como trigger_function compatível com Postgres
                     func = self.adapt2trig(name)
                     if func == 'failed':
                         return 'failed'
+                    # Guarda nome da função para testes pós migração
                     data_aux['trig_func'] = func
                     source_body += f"EXECUTE FUNCTION {func}"
+                    i += 1
                     continue
                 if i == len(tokens) - 1:
                     source_body += tokens[i] + ';'
+                    i += 1
                 else:
                     source_body += tokens[i] + ' '
+                    i += 1
         elif type in ['FUNCTION', 'PROCEDURE']:
             i = 2
             while i < len(tokens):

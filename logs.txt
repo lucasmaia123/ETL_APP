@@ -97,3 +97,93 @@
 12/08/2024 07:44:36 Sess�o 170189646657: Arquivo de backup n�o encontrado, prosseguindo...
 12/08/2024 07:44:36 Sess�o 170189646657: Terminada sess�o de ETL 170189668744
 12/08/2024 07:48:22 Sess�o 170661223212: Iniciando sess�o 170659079028 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 09:15:26 Sessão 8731925497821: Iniciando sessão 8731926623377 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 09:17:01 Sessão 8731925497821: Criando backup do schema public
+12/08/2024 09:17:01 Sessão 8731925497821: pg_dump não instalado, backup não efetuado!
+12/08/2024 09:22:51 Sessão 8756805752297: Iniciando sessão 8756751777345 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 09:30:39 Sessão 8756619774501: Iniciando sessão 8756621131745 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 09:31:09 Sessão 8756619774501: Criando backup do schema public
+12/08/2024 09:31:09 Sessão 8756619774501: pg_dump não instalado, backup não efetuado!
+12/08/2024 09:38:54 Sessão 8751888805413: Iniciando sessão 8751890218977 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 09:44:26 Sessão 8770106116021: Iniciando sessão 8770106010549 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 09:47:08 Sessão 8741987259341: Iniciando sessão 8741987951953 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 09:50:14 Sessão 8746190926785: Iniciando sessão 8746190225745 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 09:52:20 Sessão 8727665918949: Iniciando sessão 8727667125217 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 09:55:29 Sessão 8779809988109: Iniciando sessão 8779811020769 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:01:46 Sessão 8731304458177: Iniciando sessão 8731304353693 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:03:14 Sessão 8731776598989: Iniciando sessão 8731777992017 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:04:14 Sessão 8777332529681: Iniciando sessão 8777331750789 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:04:40 Sessão 8777332529681: Criando backup do schema public
+12/08/2024 10:04:40 Sessão 8777332529681: pg_dump não instalado, backup não efetuado!
+12/08/2024 10:08:04 Sessão 8771061483481: Iniciando sessão 8771061900737 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:08:18 Sessão 8771061483481: Criando backup do schema public
+12/08/2024 10:08:19 Sessão 8771061483481: Iniciando sessão 8771061900737 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:08:19 Sessão 8771061483481: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 10:08:29 Sessão 8771061483481: Migração falhou! Retornando base de dados para estado anterior...
+12/08/2024 10:08:29 Sessão 8771061483481: Base de dados retornada ao último estado estável
+12/08/2024 10:08:29 Sessão 8771061483481: Terminada sessão de ETL 8770926034593
+12/08/2024 10:15:12 Sessão 8781624590085: Iniciando sessão 8781626355137 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:15:38 Sessão 8781624590085: Criando backup do schema public
+12/08/2024 10:15:39 Sessão 8781624590085: Iniciando sessão 8781626355137 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:15:39 Sessão 8781624590085: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 10:15:50 Sessão 8781624590085: Migração falhou! Retornando base de dados para estado anterior...
+12/08/2024 10:15:50 Sessão 8781624590085: Base de dados retornada ao último estado estável
+12/08/2024 10:15:50 Sessão 8781624590085: Terminada sessão de ETL 8781489900217
+12/08/2024 10:19:50 Sessão 8785953376973: Iniciando sessão 8785953395953 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:20:08 Sessão 8785953376973: Criando backup do schema public
+12/08/2024 10:20:08 Sessão 8785953376973: Iniciando sessão 8785953395953 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:23:42 Sessão 8733881548457: Iniciando sessão 8733881566449 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:23:58 Sessão 8733881548457: Criando backup do schema public
+12/08/2024 10:23:59 Sessão 8733881548457: Iniciando sessão 8733881566449 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:23:59 Sessão 8733881548457: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 10:24:07 Sessão 8733881548457: Migração falhou! Retornando base de dados para estado anterior...
+12/08/2024 10:24:07 Sessão 8733881548457: Base de dados retornada ao último estado estável
+12/08/2024 10:24:07 Sessão 8733881548457: Terminada sessão de ETL 8733746862969
+12/08/2024 10:33:20 Sessão 8748616269517: Iniciando sessão 8748481683361 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:33:36 Sessão 8748616269517: Criando backup do schema public
+12/08/2024 10:33:37 Sessão 8748616269517: Iniciando sessão 8748481683361 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:33:37 Sessão 8748616269517: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 10:33:45 Sessão 8748616269517: Migração falhou! Retornando base de dados para estado anterior...
+12/08/2024 10:33:45 Sessão 8748616269517: Base de dados retornada ao último estado estável
+12/08/2024 10:33:45 Sessão 8748616269517: Terminada sessão de ETL 8748481587985
+12/08/2024 10:43:00 Sessão 8793402434493: Iniciando sessão 8793403080673 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:43:14 Sessão 8793402434493: Criando backup do schema public
+12/08/2024 10:43:14 Sessão 8793402434493: Iniciando sessão 8793403080673 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:43:14 Sessão 8793402434493: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 10:43:24 Sessão 8793402434493: Migração falhou! Retornando base de dados para estado anterior...
+12/08/2024 10:43:24 Sessão 8793402434493: Base de dados retornada ao último estado estável
+12/08/2024 10:43:24 Sessão 8793402434493: Terminada sessão de ETL 8793347740353
+12/08/2024 10:46:33 Sessão 8781099581113: Iniciando sessão 8781099598161 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:46:47 Sessão 8781099581113: Criando backup do schema public
+12/08/2024 10:46:48 Sessão 8781099581113: Iniciando sessão 8781099598161 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:46:48 Sessão 8781099581113: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 10:46:58 Sessão 8781099581113: Migração falhou! Retornando base de dados para estado anterior...
+12/08/2024 10:46:58 Sessão 8781099581113: Base de dados retornada ao último estado estável
+12/08/2024 10:46:58 Sessão 8781099581113: Terminada sessão de ETL 8781045643825
+12/08/2024 10:49:21 Sessão 8733558038725: Iniciando sessão 8733502286689 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:49:35 Sessão 8733558038725: Criando backup do schema public
+12/08/2024 10:49:35 Sessão 8733558038725: Iniciando sessão 8733502286689 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 10:49:35 Sessão 8733558038725: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 10:49:45 Sessão 8733558038725: Migração falhou! Retornando base de dados para estado anterior...
+12/08/2024 10:49:45 Sessão 8733558038725: Base de dados retornada ao último estado estável
+12/08/2024 10:49:45 Sessão 8733558038725: Terminada sessão de ETL 8733502286565
+12/08/2024 11:01:29 Sessão 8781079854769: Iniciando sessão 8780945199085 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 11:01:41 Sessão 8781079854769: Criando backup do schema public
+12/08/2024 11:01:42 Sessão 8781079854769: Iniciando sessão 8780945199085 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 11:01:42 Sessão 8781079854769: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 11:01:54 Sessão 8781079854769: Migração concluída com sucesso!
+12/08/2024 11:01:54 Sessão 8781079854769: Terminada sessão de ETL 8780945103621
+12/08/2024 11:19:37 Sessão 8756164500437: Iniciando sessão 8756166161857 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 11:19:58 Sessão 8756164500437: Criando backup do schema public
+12/08/2024 11:19:59 Sessão 8756164500437: Iniciando sessão 8756166161857 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 11:19:59 Sessão 8756164500437: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 11:20:11 Sessão 8756164500437: Migração concluída com sucesso!
+12/08/2024 11:20:11 Sessão 8756164500437: Terminada sessão de ETL 8756110443221
+12/08/2024 11:25:22 Sessão 8788667155161: Iniciando sessão 8788668710673 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 11:30:24 Sessão 8788667155161: Criando backup do schema public
+12/08/2024 11:30:25 Sessão 8788667155161: Iniciando sessão 8788668710673 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 11:30:25 Sessão 8788667155161: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 11:30:38 Sessão 8788667155161: Migração concluída com sucesso!
+12/08/2024 11:30:38 Sessão 8788667155161: Terminada sessão de ETL 8788532466445
+12/08/2024 11:38:03 Sessão 8752605405381: Iniciando sessão 8752604935009 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 11:45:21 Sessão 8737672481281: Iniciando sessão 8737672377237 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
