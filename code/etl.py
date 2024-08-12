@@ -26,7 +26,7 @@ def make_txt_file(name, body, error=None):
     FILE_PATH = os.path.join(APP_HOME, f'manual_migrations/{name}.txt')
     with open(FILE_PATH, "w") as file:
         file.write(body)
-        file.write('Problema: ' + str(error))
+        file.write('\nProblema: ' + str(error))
         file.close()
 
 class ETL_session_UI(tk.Toplevel):
@@ -117,8 +117,8 @@ class ETL_session_UI(tk.Toplevel):
         self.S.release()
 
 class Oracle2PostgresETL(ETL_session_UI):
-    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema):
-        super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema)
+    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, postprocess):
+        super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, postprocess)
 
     def post_processing(self):
         cur = self.pg_conn.cursor()
@@ -847,11 +847,18 @@ class Oracle2PostgresETL(ETL_session_UI):
                         else:
                             aux_token = tokens[i].split(',')
                             for i, sub_token in enumerate(aux_token):
+                                schema_aux = None
+                                if '.' in sub_token:
+                                    sub_token = sub_token.split('.')
+                                    schema_aux = sub_token[0]
+                                    sub_token = sub_token[1]
                                 if '"' in sub_token:
                                     sub_token = sub_token.removeprefix('"')
                                     sub_token = sub_token.removesuffix('"')
                                 if i < len(aux_token) - 1:
                                     sub_token += ','
+                                if schema_aux:
+                                    sub_token = f'{schema_aux}.{sub_token}'
                                 source_body += sub_token + ' '
                             continue
                     tokens[i] = tokens[i].removeprefix('"')

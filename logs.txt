@@ -49,3 +49,51 @@
 09/08/2024 09:59:17 Sess√£o 8769785919817: migrando tabelas [['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
 09/08/2024 09:59:24 Sess√£o 8769785919817: Migra√ß√£o conclu√≠da com sucesso!
 09/08/2024 09:59:24 Sess√£o 8769785919817: Terminada sess√£o de ETL 8769731841789
+11/08/2024 21:04:53 Sess„o 99451823036: Iniciando sess„o 99451543923 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+11/08/2024 21:11:06 Sess„o 139604939612: Iniciando sess„o 139602456415 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+11/08/2024 21:13:35 Sess„o 131176039260: Iniciando sess„o 131175760243 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+11/08/2024 21:14:02 Sess„o 131176039260: Criando backup do schema public
+11/08/2024 21:14:02 Sess„o 131176039260: Iniciando sess„o 131175760243 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+11/08/2024 21:14:22 Sess„o 131176039260: Criando backup do schema public
+11/08/2024 21:14:23 Sess„o 131176039260: Iniciando sess„o 131175760243 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+11/08/2024 21:15:39 Sess„o 131176039260: Criando backup do schema public
+11/08/2024 21:15:39 Sess„o 131176039260: Iniciando sess„o 131175760243 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+11/08/2024 21:21:03 Sess„o 165107346235: Iniciando sess„o 165105251137 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+11/08/2024 21:21:15 Sess„o 165107346235: Criando backup do schema public
+11/08/2024 21:21:15 Sess„o 165107346235: pg_dump n„o instalado, backup n„o efetuado!
+11/08/2024 21:22:31 Sess„o 121613183803: Iniciando sess„o 121611113281 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+11/08/2024 21:22:43 Sess„o 121613183803: Criando backup do schema public
+11/08/2024 21:22:43 Sess„o 121613183803: pg_dump n„o instalado, backup n„o efetuado!
+11/08/2024 21:26:45 Sess„o 117121748453: Iniciando sess„o 117118741061 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+11/08/2024 21:26:56 Sess„o 117121748453: Criando backup do schema public
+11/08/2024 21:26:56 Sess„o 117121748453: pg_dump n„o instalado, backup n„o efetuado!
+11/08/2024 21:26:59 Sess„o 117121748453: Iniciando sess„o 117118741061 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+11/08/2024 21:26:59 Sess„o 117121748453: migrando tabelas [['LUCAS', 'DEPT'], ['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TEST_VIEW', 'VIEW']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 07:28:24 Sess„o 143619496751: Iniciando sess„o 143617352564 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 07:30:16 Sess„o 133167164207: Iniciando sess„o 133164770164 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 07:30:44 Sess„o 133167164207: Criando backup do schema public
+12/08/2024 07:30:44 Sess„o 133167164207: pg_dump n„o instalado, backup n„o efetuado!
+12/08/2024 07:30:51 Sess„o 133167164207: Iniciando sess„o 133164770164 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 07:30:51 Sess„o 133167164207: migrando tabelas [['LUCAS', 'DEPT'], ['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TEST_VIEW', 'VIEW']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 07:33:16 Sess„o 77996096303: Iniciando sess„o 77993952116 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 07:33:28 Sess„o 77996096303: Criando backup do schema public
+12/08/2024 07:33:28 Sess„o 77996096303: pg_dump n„o instalado, backup n„o efetuado!
+12/08/2024 07:33:31 Sess„o 77996096303: Iniciando sess„o 77993952116 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 07:33:31 Sess„o 77996096303: migrando tabelas [['LUCAS', 'DEPT'], ['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TEST_VIEW', 'VIEW']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 07:34:37 Sess„o 156246915887: Iniciando sess„o 156246930482 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 07:34:47 Sess„o 156246915887: Criando backup do schema public
+12/08/2024 07:34:48 Sess„o 156246915887: pg_dump n„o instalado, backup n„o efetuado!
+12/08/2024 07:34:49 Sess„o 156246915887: Iniciando sess„o 156246930482 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 07:34:49 Sess„o 156246915887: migrando tabelas [['LUCAS', 'DEPT'], ['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TEST_VIEW', 'VIEW']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 07:34:59 Sess„o 156246915887: MigraÁ„o concluÌda com sucesso!
+12/08/2024 07:34:59 Sess„o 156246915887: Arquivo de backup n„o encontrado, prosseguindo...
+12/08/2024 07:34:59 Sess„o 156246915887: Terminada sess„o de ETL 156247469808
+12/08/2024 07:43:58 Sess„o 170189646657: Iniciando sess„o 170189648879 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 07:44:25 Sess„o 170189646657: Criando backup do schema public
+12/08/2024 07:44:26 Sess„o 170189646657: pg_dump n„o instalado, backup n„o efetuado!
+12/08/2024 07:44:27 Sess„o 170189646657: Iniciando sess„o 170189648879 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+12/08/2024 07:44:27 Sess„o 170189646657: migrando tabelas [['LUCAS', 'DEPT'], ['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TEST_VIEW', 'VIEW']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+12/08/2024 07:44:36 Sess„o 170189646657: MigraÁ„o concluÌda com sucesso!
+12/08/2024 07:44:36 Sess„o 170189646657: Arquivo de backup n„o encontrado, prosseguindo...
+12/08/2024 07:44:36 Sess„o 170189646657: Terminada sess„o de ETL 170189668744
+12/08/2024 07:48:22 Sess„o 170661223212: Iniciando sess„o 170659079028 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
