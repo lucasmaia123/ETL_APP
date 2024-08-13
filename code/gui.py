@@ -8,6 +8,7 @@ import jaydebeapi
 import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
+from ttkwidgets import tooltips
 from code.etl import Oracle2PostgresETL, Postgres2OracleETL
 from subprocess import PIPE, Popen
 import os
@@ -72,7 +73,7 @@ class etl_UI(tk.Frame):
         middle_frame = ttk.Frame(self)
         middle_frame.pack(fill='x')
         lower_frame = ttk.Frame(self)
-        lower_frame.pack(fill='x', pady=30)
+        lower_frame.pack(fill='x', pady=20)
 
         self.conn_mode = tk.StringVar()
 
@@ -101,7 +102,7 @@ class etl_UI(tk.Frame):
         self.ora_SID_entry = ttk.Entry(middle_frame, width=30)
         self.ora_SID_entry.grid(row=11, column=1, padx=10)
 
-        ttk.Button(middle_frame, text='Criar script Oracle -> Postgres').grid(row=12, column=1, padx=10, pady=10)
+        ttk.Button(middle_frame, text='Criar script Oracle -> Postgres', tooltip='Use para gerar um script e migrar manualmente\nRequer conexão a um usuário Oracle').grid(row=12, column=1, padx=10, pady=10)
 
         self.ora_service_mode.config(command=lambda:[self.ora_service_entry.config(state='normal'), self.ora_SID_entry.config(state='disabled')])
         self.ora_SID_mode.config(command=lambda:[self.ora_service_entry.config(state='disabled'), self.ora_SID_entry.config(state='normal')])
@@ -124,29 +125,28 @@ class etl_UI(tk.Frame):
         self.pg_database_entry = ttk.Entry(middle_frame, width=30)
         self.pg_database_entry.grid(row=9, column=2, padx=20)
 
+        ttk.Button(middle_frame, text='Criar script Postgres -> Oracle', tooltip='Use para gerar um script e migrar manualmente\nRequer conexão a um usuário Postgresql').grid(row=12, column=2, padx=10, pady=10)
+
         self.migration_direction = tk.IntVar()
 
-        Oracle2PostgresButton = ttk.Radiobutton(middle_frame, text='Oracle -> Postgres', state='normal', variable=self.migration_direction, value=1)
-        Oracle2PostgresButton.grid(row=10, column=2, padx=20, pady=10)
+        Oracle2PostgresButton = ttk.Radiobutton(lower_frame, text='Oracle -> Postgres', state='normal', variable=self.migration_direction, value=1, tooltip='Define direção Oracle para Postgres quando usando migração direta')
+        Oracle2PostgresButton.pack(padx=10)
 
-        Postgres2OracleButton = ttk.Radiobutton(middle_frame, text='Postgres -> Oracle', state='normal', variable=self.migration_direction, value=2)
-        Postgres2OracleButton.grid(row=11, column=2, padx=20, pady=10)
+        Postgres2OracleButton = ttk.Radiobutton(lower_frame, text='Postgres -> Oracle', state='normal', variable=self.migration_direction, value=2, tooltip='Define direção Postgres para Oracle quando usando migração direta')
+        Postgres2OracleButton.pack(padx=10)
 
         Oracle2PostgresButton.invoke()
 
         response_label = ttk.Label(lower_frame, text='')
         response_label.pack(padx=10, pady=10)
 
-        test_button = ttk.Button(lower_frame, text='Testar conexão')
-        test_button.pack(side='left', padx=10, pady=10)
-        next_button = ttk.Button(lower_frame, text='Prosseguir com conexão direta')
-        next_button.pack(side='right', padx=10, pady=10)
-
-        test_button.config(command=lambda: self.initialize_conn(response_label, True))
-        next_button.config(command=lambda: self.initialize_conn(response_label))
+        test_button = ttk.Button(lower_frame, text='Testar conexão', command=lambda: self.initialize_conn(response_label, 'test'), tooltip='Testa se é possível alcançar as bases de dados com as credenciais providas')
+        test_button.pack(side='left', padx=20, pady=20)
+        direct_migration_button = ttk.Button(lower_frame, text='Prosseguir com migração direta', command=lambda: self.initialize_conn(response_label, 'direct'), tooltip='Migração rápida utilizando multiprocessamento\nRequer conexão direta com ambas as bases de dados\nMigração direta não gera scripts')
+        direct_migration_button.pack(side='right', padx=20, pady=20)
 
     # Coleta os atributos que o usuário forneceu e cria variáveis de conexão
-    def initialize_conn(self, response, test = False):
+    def initialize_conn(self, response,  mode=''):
         
         self.ora_driver = "oracle.jdbc.driver.OracleDriver"
         self.pg_driver = "org.postgresql.Driver"
@@ -170,10 +170,55 @@ class etl_UI(tk.Frame):
             response.config(text='Preencha todos os parâmetros de conexão!')
             return
 
-        conns = self.conn_test(response)
+        conns = self.conn_test()
+        if mode == 'test':
+            if conns[0] and conns[1]:
+                response.config(text='Conexão estabelecida com Oracle e Postgres!')
+            elif conns[0]:
+                if conns[1] == False:
+                    response.config(text='Conexão estabelecida com Postgres\nConexão falhou com Oracle!')
+                else:
+                    response.config(text='Conexão estabelecida com Postgres!')
+            elif conns[1]:
+                if conns[0] == False:
+                    response.config(text='Conexão estabelecida com Oracle\nConexão falhou com Postgres!')
+                else:
+                    response.config(text='Conexão estabelecida com Oracle!')
+            else:
+                response.config(text='Conexão falhou! Cheque se as credenciais estão corretas')
 
-        # Estabelece conexão ou apenas testa 
-        if conns and not test:
+        # Estabelece conexão para criação de script postgres para oracle
+        if conns[0] and mode == 'script2oracle':
+            pass
+
+        # Estabelece conexão para criação de script oracle para postgres
+        if conns[1] and mode == 'script2postgres':
+            response.config(text='Conectando...')
+            self.update()
+            # Inicializa uma sessão do pyspark para começar a migração
+            try:
+                etl = SparkSession(SparkContext(conf=self.conf)).newSession()
+            except:
+                self.message_window('Sessão de ETL já iniciada!')
+                response.config(text='')
+                return
+            self.ora_dba = False
+            if self.ora_user == 'sys as sysdba':
+                self.ora_dba = True
+            else:
+                try:
+                    query = f"SELECT granted_role FROM dba_role_privs WHERE grantee = '{self.ora_user.upper()}'"
+                    priv = etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+                    priv = [priv[i]['GRANTED_ROLE'] for i in range(len(priv))]
+                    if 'DBA' in priv:
+                        self.ora_dba = True
+                except:
+                    pass
+            Oracle2Postgres(self, etl, 'script')
+            response.config(text='')
+
+        # Estabelece conexão para migração direta
+        if all(conns) and mode == 'direct':
             response.config(text='Conectando...')
             self.update()
             # Inicializa uma sessão do pyspark para começar a migração
@@ -204,43 +249,53 @@ class etl_UI(tk.Frame):
             else:
                 self.pg_superuser = False
             if self.migration_direction.get() == 1:
-                Oracle2Postgres(self, etl)
+                Oracle2Postgres(self, etl, 'direct')
             if self.migration_direction.get() == 2:
                 self.message_window('Não implementado!')
                 etl.stop()
             response.config(text='')
+        elif mode == 'direct':
+            if conns[0] == False and conns[1] == True:
+                response.config(text='Migração direta requer conexão a ambas as bases de dados\nConexão a postgres falhou!')
+            elif conns[0] == True and conns[1] == False:
+                response.config(text='Migração direta requer conexão a ambas as bases de dados\nConexão a oracle falhou!')
+            else:
+                response.config(text='Migração direta requer conexão a ambas as bases de dados\nConexão a postgres e oracle falharam!')
 
     # Testa as credenciais de conexão fornecidas
-    def conn_test(self, output):
-        response = ''
+    def conn_test(self):
         conn = []
-        try:
-            # Estabelece conexão genêrica
-            self.pg_url = f"jdbc:postgresql://{self.pg_host}:{self.pg_port}/{self.pg_database}"
-            if self.pg_conn != None:
-                self.pg_conn.close()
-            self.pg_conn = jaydebeapi.connect(self.pg_driver, self.pg_url, [self.pg_user, self.pg_password], self.pg_jar)
-            response = response + 'Conexão estabelecida com Postgres!\n'
-            conn.append(True)
-        except:
-            response = 'Conexão falhou com Postgres!\n'
-            conn.append(False)
-        try:
-            if self.ora_user.lower() == 'sys':
-                self.ora_user = 'sys as sysdba'
-            if self.conn_mode.get() == 'name':
-                self.ora_url = f"jdbc:oracle:thin:@//{self.ora_host}:{self.ora_port}/{self.ora_service}"
-            if self.conn_mode.get() == 'SID':
-                self.ora_url = f"jdbc:oracle:thin:@{self.ora_host}:{self.ora_port}:{self.ora_service}"
-            if self.ora_conn != None:
-                self.ora_conn.close()
-            self.ora_conn = jaydebeapi.connect(self.ora_driver, self.ora_url, [self.ora_user, self.ora_password], self.ora_jar)
-            response = response + 'Conexão estabelecida com Oracle!'
-            conn.append(True)
-        except:
-            response = response + 'Conexão falhou com Oracle!'
-            conn.append(False)
-        output.config(text=response)
+        if len(self.pg_user) and len(self.pg_password):
+            try:
+                self.pg_url = f"jdbc:postgresql://{self.pg_host}:{self.pg_port}/{self.pg_database}"
+                if self.pg_conn != None:
+                    self.pg_conn.close()
+                self.pg_conn = jaydebeapi.connect(self.pg_driver, self.pg_url, [self.pg_user, self.pg_password], self.pg_jar)
+                conn.append(True)
+            except:
+                conn.append(False)
+        else:
+            self.pg_url = None
+            self.pg_conn = None
+            conn.append(None)
+        if len(self.ora_user) and len(self.ora_password):
+            try:
+                if self.ora_user.lower() == 'sys':
+                    self.ora_user = 'sys as sysdba'
+                if self.conn_mode.get() == 'name':
+                    self.ora_url = f"jdbc:oracle:thin:@//{self.ora_host}:{self.ora_port}/{self.ora_service}"
+                if self.conn_mode.get() == 'SID':
+                    self.ora_url = f"jdbc:oracle:thin:@{self.ora_host}:{self.ora_port}:{self.ora_service}"
+                if self.ora_conn != None:
+                    self.ora_conn.close()
+                self.ora_conn = jaydebeapi.connect(self.ora_driver, self.ora_url, [self.ora_user, self.ora_password], self.ora_jar)
+                conn.append(True)
+            except:
+                conn.append(False)
+        else:
+            self.ora_url = None
+            self.ora_conn = None
+            conn.append(None)
         return conn
 
     # Ferramenta para mensagem de erros
@@ -260,7 +315,7 @@ class etl_UI(tk.Frame):
 # Classe para preparação do ETL de Oracle para Postgres
 class Oracle2Postgres(tk.Toplevel):
     
-    def __init__(self, master, conn_session):
+    def __init__(self, master, conn_session, mode):
         super().__init__(master)
         self.protocol('WM_DELETE_WINDOW', self.close)
         self.title('Oracle para Postgres')
@@ -271,21 +326,34 @@ class Oracle2Postgres(tk.Toplevel):
             if key[0] != '_' and key not in self_refs:
                 exec(f'self.{key} = master.{key}')
         self.master = master
+        self.mode = mode
         self.full_backup = False
         self.deleted_objects = []
-        # Postprocess será usado para guardar operações DDL/DML que devem ser executados antes da migração
-        self.postprocess = {}
-        self.postprocess['create_user'] = None
-        self.postprocess['create_superuser'] = None
-        self.postprocess['delete_user'] = None
-        self.postprocess['create_database'] = None
-        self.postprocess['owner_database'] = None
-        self.postprocess['delete_database'] = []
-        self.postprocess['create_schema'] = []
-        self.postprocess['delete_schema'] = []
-        self.postprocess['owner_schema'] = None
-        self.postprocess['connect'] = None
-        self.write2log(f'Iniciando sessão {self.__hash__()} de Oracle {self.ora_url} para Postgres {self.pg_url}')
+        # Setup será usado para guardar operações DDL/DML que devem ser executados antes da migração
+        self.setup = {}
+        self.setup['create_user'] = None
+        self.setup['create_superuser'] = None
+        self.setup['delete_user'] = None
+        self.setup['create_database'] = []
+        self.setup['owner_database'] = None
+        self.setup['delete_database'] = []
+        self.setup['create_schema'] = []
+        self.setup['delete_schema'] = []
+        self.setup['owner_schema'] = None
+        self.setup['connect'] = None
+        if self.mode == 'script':
+            self.write2log(f'Iniciando sessão {self.__hash__()} para criação de script na conexão {self.ora_url}')
+            self.pg_users = None
+            self.pg_schemas = None
+            self.pg_databases = None
+        elif self.mode == 'direct':
+            self.write2log(f'Iniciando sessão {self.__hash__()} de Oracle {self.ora_url} para Postgres {self.pg_url}')
+            self.pg_users = self.execute_spark_query('pg', 'SELECT usename FROM pg_user')
+            self.pg_users = [self.pg_users[i]['usename'] for i in range(len(self.pg_users))]
+            self.pg_schemas = self.execute_spark_query('pg', 'SELECT nspname FROM pg_namespace')
+            self.pg_schemas = [self.pg_schemas[i]['nspname'] for i in range(len(self.pg_schemas))]
+            self.pg_databases = self.execute_spark_query('pg', 'SELECT datname FROM pg_database')
+            self.pg_databases = [self.pg_databases[i]['datname'] for i in range(len(self.pg_databases))]
         if self.ora_dba:
             self.draw_schema_selection_window()
         else:
@@ -416,10 +484,6 @@ class Oracle2Postgres(tk.Toplevel):
                 self.user = schema
             else:
                 return
-            self.pg_users = self.execute_spark_query('pg', 'SELECT usename FROM pg_user')
-            self.pg_users = [self.pg_users[i]['usename'] for i in range(len(self.pg_users))]
-            self.pg_schemas = self.execute_spark_query('pg', 'SELECT nspname FROM pg_namespace')
-            self.pg_schemas = [self.pg_schemas[i]['nspname'] for i in range(len(self.pg_schemas))]
             # Migração de usuário/schema
             if self.migration_mode.get() > 0 and not self.pg_superuser:
                     self.message_window('Para migrar um schema, por favor logue como um superuser postgres!')
@@ -443,19 +507,28 @@ class Oracle2Postgres(tk.Toplevel):
     # Pede permissão para deletar schema caso já exista
     def schema_exists(self, schema):
         window = tk.Toplevel(self)
-        ttk.Label(window, text=f'O schema {schema.lower()} já existe na base de dados\nDeseja substituilo?').pack(padx=20, pady=20)
-        ttk.Button(window, text='Sim', command=lambda:[self.migrate_schema_window(schema), window.destroy()]).pack(side='right', padx=20, pady=10)
-        ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=10)
+        ttk.Label(window, text=f'O schema {schema.lower()} já existe na base de dados, como proceder?').pack(padx=20, pady=20)
+        ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='right', padx=20, pady=20)
+        ttk.Button(window, text='Deletar schema', command=lambda:[self.migrate_schema_window(schema, 'delete'), window.destroy()]).pack(side='right', padx=20, pady=20)
+        ttk.Button(window, text='Inserir no schema', command=lambda:[self.migrate_schema_window(schema, 'keep'), window.destroy()]).pack(side='right', padx=20, pady=20)
 
-    def migrate_schema_window(self, schema):
+    def migrate_schema_window(self, schema, mode=None):
+
+        if mode == 'delete':
+            self.setup['delete_schema'].append(schema)
+        elif mode == 'keep':
+            self.setup['owner_schema'] = [self.pg_user, schema]
+        else:
+            self.setup['create_schema'].append(schema)
 
         query = f"SELECT name, type FROM all_source WHERE owner = '{schema}' \
                 UNION SELECT view_name, 'VIEW' FROM all_views WHERE owner = '{schema}' \
                 UNION SELECT table_name, 'TABLE' FROM all_tables WHERE owner = '{schema}'"
         objects = self.execute_spark_query('ora', query)
+        objects = [[objects[i]['NAME'], objects[i]['TYPE']] for i in range(len(objects))]
 
         window = tk.Toplevel(self)
-        ttk.Label(window, text='Objetos sendo migrados:')
+        ttk.Label(window, text='Objetos sendo migrados:').pack(padx=10, pady=10)
         box_frame = ttk.Frame(window)
         box_frame.pack()
         scrollBar = tk.Scrollbar(box_frame, orient='vertical')
@@ -471,15 +544,6 @@ class Oracle2Postgres(tk.Toplevel):
 
     # Coleta objetos do schema a ser migrado e cria novo schema
     def migrate_schema(self, schema, objects):
-
-        # self.create_backup()
-        if schema in self.pg_schemas:
-            self.postprocess['delete_schema'] = schema
-        self.postprocess['create_schema'] = schema
-        # cur = self.pg_conn.cursor()
-        # cur.execute(f'DROP SCHEMA IF EXISTS {schema.lower()} CASCADE')
-        # cur.execute(f'CREATE SCHEMA {schema.lower()}')
-        # cur.close()
         self.pg_schema = schema.lower()
         tables = []
         sources = []
@@ -608,15 +672,14 @@ class Oracle2Postgres(tk.Toplevel):
             if user.lower() in self.pg_users:
                 # Deleta objetos e databases pertencentes ao usuário
                 query = f"select datname from pg_database as db join pg_roles as role on db.datdba = role.oid where role.rolname = '{user}'"
-                dbs = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query=query).load().collect()
-                for db in [dbs[i]['datname'] for i in range(len(dbs))]:
-                    self.postprocess['delete_database'].append(db)
-                self.postprocess['delete_user'] = user
+                for db in self.pg_databases:
+                    self.setup['delete_database'].append(db)
+                self.setup['delete_user'] = user
 
             if superuser:
-                self.postprocess['create_superuser'] = [user, password]
+                self.setup['create_superuser'] = [user, password]
             else:
-                self.postprocess['create_user'] = [user, password]
+                self.setup['create_user'] = [user, password]
         
         # Migra todas as tabelas e procedures relacionadas ao usuário
         query = f"SELECT table_name FROM all_tables WHERE owner = '{user.upper()}'"
@@ -630,18 +693,18 @@ class Oracle2Postgres(tk.Toplevel):
         # Migrar usuário 'exemplo' criará o db 'exemplo' com o único schema 'public' e dará todas as permissões para o usuário 'exemplo' no db 'exemplo'
         if create_db:
             # Checa se o database existe
-            databases = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query='SELECT datname FROM pg_database').load().collect()
-            databases = [databases[i]['datname'] for i in range(len(databases))]
-            if user not in databases:
-                self.postprocess['create_database'] = user
+            if user not in self.pg_databases:
+                self.setup['create_database'] = user
             else:
-                self.write2log(f'Database {user} já existe, transferindo permissões para usuário {user}!')
-            self.postprocess['owner_database'] = [user, user]
-            # cur.execute(f'GRANT CONNECT ON DATABASE {user} TO {user}')
-            # cur.execute(f'ALTER DATABASE {user} OWNER TO {user}')
-            # cur.close()
+                res = self.database_exists(user)
+                if res == 'delete':
+                    self.setup['delete_database'].append(user)
+                    self.setup['create_database'].append(user)
+                elif not res:
+                    return
+            self.setup['owner_database'] = [user, user]
             new_pg_url = f"jdbc:postgresql://{self.pg_host}:{self.pg_port}/{user}"
-            self.postprocess['connect'] = {'url': new_pg_url, 'user': user, 'password': password, 'database': user}
+            self.setup['connect'] = {'url': new_pg_url, 'user': user, 'password': password, 'database': user}
             self.write2log(f'Conectado no database {user} com novo usuário {user}')
             self.pg_schema = 'public'
         # Cria apenas o schema com o nome do usuário e insere no DB atual
@@ -649,12 +712,23 @@ class Oracle2Postgres(tk.Toplevel):
             pg_schemas = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query='SELECT nspname FROM pg_namespace').load().collect()
             pg_schemas = [pg_schemas[i]['nspname'] for i in range(len(pg_schemas))]
             if user not in pg_schemas:
-                self.postprocess['create_schema'].append(user)
-            self.postprocess['owner_schema'] = [user, user]
+                self.setup['create_schema'].append(user)
+            self.setup['owner_schema'] = [user, user]
             self.pg_schema = user
             cur.close()
         self.full_backup = True
         self.etl_initialization(tables, sources)
+
+    def database_exists(self, db):
+        window = tk.Toplevel(self)
+        res = tk.StringVar()
+        res.set(None)
+        ttk.Label(window, text=f'Database {db} já existe, como proceder?').pack(padx=10, pady=10)
+        ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='right', padx=20, pady=20)
+        ttk.Button(window, text='Deletar database', command=lambda:[res.set('delete'), window.destroy()]).pack(side='right', padx=20, pady=20)
+        ttk.Button(window, text='Inserir no db existente', command=lambda:[res.set('keep'), window.destroy()]).pack(side='right', padx=20, pady=20)
+        self.wait_window(window)
+        return res.get()
 
     # Lista as tabelas disponiveis com a conexão estabelecida e permite o usuário escolher quais tabelas serão migradas
     def draw_table_selection_window(self, user):
@@ -748,7 +822,7 @@ class Oracle2Postgres(tk.Toplevel):
             # self.write2log(f'Criando schema {self.pg_schema} na base de dados {self.pg_database}...')
             # cur.execute(f'CREATE SCHEMA {self.pg_schema}')
             # cur.close()
-            self.postprocess['create_schema'] = self.pg_schema
+            self.setup['create_schema'] = self.pg_schema
         # Se o schema existir, checa se o usuário tem permissão para criar tabelas
         elif not self.pg_superuser:
             query = f"SELECT usename AS grantee, nspname, privilege_type \
@@ -1021,27 +1095,27 @@ class Oracle2Postgres(tk.Toplevel):
         added_info = ScrolledText(window, wrap=tk.WORD, state='normal')
         added_info.config(height=20, width=50)
         added_info.pack(padx=10, pady=10)
-        if self.postprocess['create_database']:
-            added_info.insert(tk.END, f"Cria novo database {self.postprocess['create_database']}\n")
-        for schema in self.postprocess['create_schema']:
-            added_info.insert(tk.END, f'Cria novo schema {schema}\n')
-        if self.postprocess['create_user']:
-            added_info.insert(tk.END, f"Cria novo usuário {self.postprocess['create_user']}\n")
+        if self.setup['create_database']:
+            added_info.insert(tk.END, f"Cria novo database {self.setup['create_database']}\n")
+        if self.setup['create_schema']:
+            added_info.insert(tk.END, f"Cria novo schema {self.setup['create_schema']}\n")
+        if self.setup['create_user']:
+            added_info.insert(tk.END, f"Cria novo usuário {self.setup['create_user']}\n")
         for table in tables:
             added_info.insert(tk.END, f'Tabela {table[0]}.{table[1]} Oracle -> {self.pg_schema}.{table[1]} Postgres\n')
         for source in sources:
             added_info.insert(tk.END, f'{source[2]} {source[0]}.{source[1]} Oracle -> {self.pg_schema}.{source[1]} Postgres\n')
-        if len(self.postprocess['delete_database']) > 0 or len(self.postprocess['delete_schema']) > 0 or len(self.deleted_objects) > 0 or self.postprocess['delete_user']:
+        if len(self.setup['delete_database']) > 0 or len(self.setup['delete_schema']) > 0 or len(self.deleted_objects) > 0 or self.setup['delete_user']:
             ttk.Label(window, text='Os seguintes objetos serão removidos da base de dados:').pack(padx=10, pady=10)
             dropped_info = ScrolledText(window, wrap=tk.WORD, state='normal')
             dropped_info.config(height=20, width=50)
             dropped_info.pack(padx=10, pady=10)
-            for database in self.postprocess['delete_database']:
+            for database in self.setup['delete_database']:
                 dropped_info.insert(tk.END, f'Remove database {database}\n')
-            for schema in self.postprocess['delete_schema']:
+            for schema in self.setup['delete_schema']:
                 dropped_info.insert(tk.END, f'Remove schema {schema}\n')
-            if self.postprocess['delete_user']:
-                dropped_info.insert(tk.END, f"Deleta usuário {self.postprocess['create_user']}\n")
+            if self.setup['delete_user']:
+                dropped_info.insert(tk.END, f"Deleta usuário {self.setup['create_user']}\n")
             for object in self.deleted_objects:
                 dropped_info.insert(tk.END, f'Substitui/remove {object[2]} {object[0]}.{object[1]}\n')
         ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)
@@ -1065,11 +1139,11 @@ class Oracle2Postgres(tk.Toplevel):
             else:
                 return
         self.write2log(f'Iniciando sessão {self.__hash__()} de Oracle {self.ora_url} para Postgres {self.pg_url}')
-        etl_session = Oracle2PostgresETL(self.master, pg_conf, ora_conf, self.user, tables, sources, self.etl, self.pg_jar, self.ora_jar, self.pg_schema, self.postprocess)
+        etl_session = Oracle2PostgresETL(self.master, pg_conf, ora_conf, self.user, tables, sources, self.etl, self.pg_jar, self.ora_jar, self.pg_schema, self.setup)
         self.write2log(f"migrando tabelas {tables} e sources {sources} do Oracle schema '{self.user}' para Postgres database {self.pg_database} schema '{self.pg_schema}'!")
         self.active_sessions.append(etl_session)
         # Começa a migração
-        etl_session.post_processing()
+        etl_session.setup_processing()
         etl_session.start_etl()
         self.wait4ETL(etl_session)
         if self.ora_dba:

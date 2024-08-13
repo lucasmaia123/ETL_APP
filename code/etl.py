@@ -38,7 +38,7 @@ class ETL_session_UI(tk.Toplevel):
     S = threading.Semaphore()
     _state = 'idle'
 
-    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, postprocess):
+    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup):
         try:
             super().__init__(master)
             self.protocol('WM_DELETE_WINDOW', self.stop_etl)
@@ -58,8 +58,10 @@ class ETL_session_UI(tk.Toplevel):
             self.sources = sources
             self.etl = etl
             self.pg_schema = schema
+            self.ora_jar = ora_jar
+            self.pg_jar = pg_jar
             self.master = master
-            self.postprocess = postprocess
+            self.setup = setup
             # Conexões genéricas para execução de DML/DDL (PySpark apenas executa queries para coleta de dados)
             # (auto-commit ON, usar a função commit() ou fetch() em operações DML/DDL causará erro,
             #  operações DML/DDL executadas seram aplicadas na base de dados automaticamente!)
@@ -117,12 +119,12 @@ class ETL_session_UI(tk.Toplevel):
         self.S.release()
 
 class Oracle2PostgresETL(ETL_session_UI):
-    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, postprocess):
-        super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, postprocess)
+    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup):
+        super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup)
 
-    def post_processing(self):
+    def setup_processing(self):
         cur = self.pg_conn.cursor()
-        for db in self.postprocess['delete_database']:
+        for db in self.setup['delete_database']:
             try:
                 cur.execute(f'DROP DATABASE {db} WITH (FORCE)')
             except:
@@ -130,39 +132,38 @@ class Oracle2PostgresETL(ETL_session_UI):
                 ttk.Label(window, text=f'Database {db} tem sessões abertas, feche todas as sessões e tente novamente!').pack(padx=20, pady=20)
                 ttk.Button(window, text='Ok', command=window.destroy).pack(padx=20, pady=20)
                 return 'failed'
-        if self.postprocess['create_database']:
-            cur.execute(f"CREATE DATABASE {self.postprocess['create_database']}")
-        if self.postprocess['owner_database']:
-            owner = self.postprocess['owner_database']
-            cur.execute(f'GRANT CONNECT ON DATABASE {owner[0]} TO {owner[1]}')
-            cur.execute(f'ALTER DATABASE {owner[0]} OWNER TO {owner[1]}')
-        if self.postprocess['delete_user']:
-            user = self.postprocess['delete_user']
+        for db in self.setup['create_database']:
+            cur.execute(f"CREATE DATABASE {db}")
+        if self.setup['delete_user']:
+            user = self.setup['delete_user']
             cur.execute(f'DROP OWNED BY {user} CASCADE')
             cur.execute(f'DROP USER {user}')
-        if self.postprocess['create_superuser']:
-            user = self.postprocess['create_superuser'][0]
-            password = self.postprocess['create_superuser'][1]
-            cur.execute(f'CREATE SUPERUSER {user} IDENTIFIED BY {password}')
-        elif self.postprocess['create_user']:
-            user = self.postprocess['create_user'][0]
-            password = self.postprocess['create_user'][1]
-            cur.execute(f'CREATE USER {user} IDENTIFIED BY {password}')
-        if self.postprocess['connect']:
-            self.pg_url =  self.postprocess['connect']['url']
-            self.pg_user =  self.postprocess['connect']['user']
-            self.pg_password =  self.postprocess['connect']['password']
-            self.pg_database =  self.postprocess['connect']['database']
+        if self.setup['create_superuser']:
+            user = self.setup['create_superuser'][0]
+            password = self.setup['create_superuser'][1]
+            cur.execute(f"CREATE SUPERUSER {user} WITH PASSWORD '{password}'")
+        elif self.setup['create_user']:
+            user = self.setup['create_user'][0]
+            password = self.setup['create_user'][1]
+            cur.execute(f"CREATE USER {user} WITH PASSWORD '{password}'")
+        if self.setup['owner_database']:
+            owner = self.setup['owner_database']
+            cur.execute(f'GRANT CONNECT ON DATABASE {owner[0]} TO {owner[1]}')
+            cur.execute(f'ALTER DATABASE {owner[0]} OWNER TO {owner[1]}')
+        if self.setup['connect']:
+            self.pg_url = self.setup['connect']['url']
+            self.pg_user = self.setup['connect']['user']
+            self.pg_password = self.setup['connect']['password']
+            self.pg_database = self.setup['connect']['database']
             cur.close()
             self.pg_conn = jaydebeapi.connect(self.pg_driver, self.pg_url, [self.pg_user, self.pg_password], self.pg_jar)
             cur = self.pg_conn.cursor()
-        if self.postprocess['create_schema']:
-            schema = self.postprocess['create_schema']
+        if self.setup['create_schema']:
+            schema = self.setup['create_schema']
             cur.execute(f'DROP SCHEMA IF EXISTS {schema} CASCADE')
             cur.execute(f'CREATE SCHEMA {schema}')
-            self.write2log(f'Criado schema {schema} no database {self.pg_database}')
-        if self.postprocess['owner_schema']:
-            owner = self.postprocess['owner_schema']
+        if self.setup['owner_schema']:
+            owner = self.setup['owner_schema']
             cur.execute(f'GRANT USAGE ON SCHEMA {owner[0]} TO {owner[1]}')
             cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA {owner[0]} GRANT ALL PRIVILEGES ON TABLES TO {owner[1]}')
             cur.execute(f'ALTER SCHEMA {owner[0]} OWNER TO {owner[1]}')

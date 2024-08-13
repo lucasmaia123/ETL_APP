@@ -6,3 +6,4 @@ py4j==0.10.9.7
 pyinstaller
 pyinstaller-hooks-contrib
 pyspark==3.5.1
+ttkwidgets
