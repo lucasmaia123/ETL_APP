@@ -4,7 +4,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from copy import deepcopy
 from time import sleep
-import jaydebeapi
+import psycopg2
+import oracledb
 import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
@@ -51,11 +52,10 @@ class etl_UI(tk.Frame):
     # Limpa processos da memória e fecha o app
     def end_process(self):
         if self.pg_conn:
-            if not self.pg_conn._closed:
+            if not self.pg_conn.closed:
                 self.pg_conn.close()
         if self.ora_conn:
-            if not self.ora_conn._closed:
-                self.ora_conn.close()
+            self.ora_conn.close()
         self.master.quit()
         self.master.destroy()
 
@@ -229,7 +229,7 @@ class etl_UI(tk.Frame):
                 response.config(text='')
                 return
             self.ora_dba = False
-            if self.ora_user == 'sys as sysdba':
+            if self.ora_user == 'sys':
                 self.ora_dba = True
             else:
                 try:
@@ -250,6 +250,7 @@ class etl_UI(tk.Frame):
                 self.pg_superuser = False
             if self.migration_direction.get() == 1:
                 Oracle2Postgres(self, etl, 'direct')
+                etl.read.format('jdbc').options()   
             if self.migration_direction.get() == 2:
                 self.message_window('Não implementado!')
                 etl.stop()
@@ -270,7 +271,7 @@ class etl_UI(tk.Frame):
                 self.pg_url = f"jdbc:postgresql://{self.pg_host}:{self.pg_port}/{self.pg_database}"
                 if self.pg_conn != None:
                     self.pg_conn.close()
-                self.pg_conn = jaydebeapi.connect(self.pg_driver, self.pg_url, [self.pg_user, self.pg_password], self.pg_jar)
+                self.pg_conn = psycopg2.connect(dbname=self.pg_database, user=self.pg_user, password=self.pg_password, host=self.pg_host, port=self.pg_port)
                 conn.append(True)
             except:
                 conn.append(False)
@@ -280,15 +281,20 @@ class etl_UI(tk.Frame):
             conn.append(None)
         if len(self.ora_user) and len(self.ora_password):
             try:
-                if self.ora_user.lower() == 'sys':
-                    self.ora_user = 'sys as sysdba'
                 if self.conn_mode.get() == 'name':
                     self.ora_url = f"jdbc:oracle:thin:@//{self.ora_host}:{self.ora_port}/{self.ora_service}"
                 if self.conn_mode.get() == 'SID':
                     self.ora_url = f"jdbc:oracle:thin:@{self.ora_host}:{self.ora_port}:{self.ora_service}"
                 if self.ora_conn != None:
                     self.ora_conn.close()
-                self.ora_conn = jaydebeapi.connect(self.ora_driver, self.ora_url, [self.ora_user, self.ora_password], self.ora_jar)
+                if self.ora_user.lower() == 'sys':
+                    auth_mode = oracledb.AUTH_MODE_SYSDBA
+                else:
+                    auth_mode = oracledb.AUTH_MODE_DEFAULT
+                if self.conn_mode.get() == 'name':
+                    self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=auth_mode)
+                else:
+                    self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, sid=self.ora_service, mode=auth_mode)
                 conn.append(True)
             except:
                 conn.append(False)
@@ -343,17 +349,14 @@ class Oracle2Postgres(tk.Toplevel):
         self.setup['connect'] = None
         if self.mode == 'script':
             self.write2log(f'Iniciando sessão {self.__hash__()} para criação de script na conexão {self.ora_url}')
-            self.pg_users = None
-            self.pg_schemas = None
-            self.pg_databases = None
         elif self.mode == 'direct':
             self.write2log(f'Iniciando sessão {self.__hash__()} de Oracle {self.ora_url} para Postgres {self.pg_url}')
-            self.pg_users = self.execute_spark_query('pg', 'SELECT usename FROM pg_user')
-            self.pg_users = [self.pg_users[i]['usename'] for i in range(len(self.pg_users))]
-            self.pg_schemas = self.execute_spark_query('pg', 'SELECT nspname FROM pg_namespace')
-            self.pg_schemas = [self.pg_schemas[i]['nspname'] for i in range(len(self.pg_schemas))]
-            self.pg_databases = self.execute_spark_query('pg', 'SELECT datname FROM pg_database')
-            self.pg_databases = [self.pg_databases[i]['datname'] for i in range(len(self.pg_databases))]
+        self.pg_users = self.execute_query('pg', 'SELECT usename FROM pg_user')
+        self.pg_users = [self.pg_users[i][0] for i in range(len(self.pg_users))]
+        self.pg_schemas = self.execute_query('pg', 'SELECT nspname FROM pg_namespace')
+        self.pg_schemas = [self.pg_schemas[i][0] for i in range(len(self.pg_schemas))]
+        self.pg_databases = self.execute_query('pg', 'SELECT datname FROM pg_database')
+        self.pg_databases = [self.pg_databases[i][0] for i in range(len(self.pg_databases))]
         if self.ora_dba:
             self.draw_schema_selection_window()
         else:
@@ -364,12 +367,18 @@ class Oracle2Postgres(tk.Toplevel):
         self.etl.stop()
         self.destroy()
 
-    def execute_spark_query(self, type, query):
+    def execute_query(self, type, query):
         try:
             if type == 'pg':
-                res = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query=query).load().collect()
+                cur = self.pg_conn.cursor()
+                cur.execute(query)
+                res = cur.fetchall()
+                cur.close()
             elif type == 'ora':
-                res = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+                cur = self.ora_conn.cursor()
+                cur.execute(query)
+                res = cur.fetchall()
+                cur.close()
             return res
         except Exception as e:
             print('Error' + str(e))
@@ -446,8 +455,8 @@ class Oracle2Postgres(tk.Toplevel):
 
         # Coleta usuários (schemas em Oracle) que não são padrões do Oracle
         query = "SELECT username FROM all_users WHERE oracle_maintained = 'N'"
-        schemas = self.execute_spark_query('ora', query)
-        schemas = [schemas[i]['USERNAME'] for i in range(len(schemas))]
+        schemas = self.execute_query('ora', query)
+        schemas = [schemas[i][0] for i in range(len(schemas))]
 
         ttk.Label(self, text='Conectado como usuário do sistema\nSelecione o usuário/schema que deseja migrar').pack(padx=20, pady=10)
         user_frame = ttk.Frame(self, height=300)
@@ -524,8 +533,8 @@ class Oracle2Postgres(tk.Toplevel):
         query = f"SELECT name, type FROM all_source WHERE owner = '{schema}' \
                 UNION SELECT view_name, 'VIEW' FROM all_views WHERE owner = '{schema}' \
                 UNION SELECT table_name, 'TABLE' FROM all_tables WHERE owner = '{schema}'"
-        objects = self.execute_spark_query('ora', query)
-        objects = [[objects[i]['NAME'], objects[i]['TYPE']] for i in range(len(objects))]
+        objects = self.execute_query('ora', query)
+        objects = [[objects[i][0], objects[i][1]] for i in range(len(objects))]
 
         window = tk.Toplevel(self)
         ttk.Label(window, text='Objetos sendo migrados:').pack(padx=10, pady=10)
@@ -609,9 +618,9 @@ class Oracle2Postgres(tk.Toplevel):
                 and nsp.nspname not like 'pg_toast%' \
                 and rol.rolname = '{user.lower()}' \
             order by nsp.nspname, cls.relname"
-        objects = self.execute_spark_query('pg', query)
+        objects = self.execute_query('pg', query)
         query = f"select datname from pg_database as db join pg_roles as role on db.datdba = role.oid where role.rolname = '{user.lower()}'"
-        dbs = self.execute_spark_query('pg', query)
+        dbs = self.execute_query('pg', query)
         if len(objects) == 0 and len(dbs) == 0:
             self.migrate_user_window(user, True)
         else:
@@ -627,14 +636,14 @@ class Oracle2Postgres(tk.Toplevel):
                 textBox.insert(tk.END, 'Schema    Nome    Tipo\n')
                 textBox.insert(tk.END, '-' * 30 + '\n')
                 for object in objects:
-                    textBox.insert(tk.END, f"{object['schemaname']}    {object['objectname']}   {object['objecttype']}\n")
-                    self.deleted_objects.append([object['schemaname'], object['objectname'], object['objecttype']])
+                    textBox.insert(tk.END, f"{object[0]}    {object[1]}   {object[3]}\n")
+                    self.deleted_objects.append([object[0], object[1], object[3]])
             textBox.insert(tk.END, '-' * 30 + '\n')
             if len(dbs):
                 textBox.insert(tk.END, 'Base de dados\n')
                 textBox.insert(tk.END, '-' * 30 + '\n')
                 for db in dbs:
-                    textBox.insert(tk.END, db['datname'] + '\n')
+                    textBox.insert(tk.END, db[0] + '\n')
             scrollBar.config(command=textBox.yview)
             textBox.config(state='disabled')
             ttk.Label(window, text='Você tem certeza que deseja prosseguir?\n(Deleção ocorrerá apenas durante a migração)').pack(padx=10, pady=10)
@@ -648,7 +657,7 @@ class Oracle2Postgres(tk.Toplevel):
         # Checa se a senha fornecida está correta quando mantendo um usuário já existente
         elif user.lower() in self.pg_users and not new_user:
             try:
-                test_conn = jaydebeapi.connect(self.pg_driver, self.pg_url, [user.lower(), password], self.pg_jar)
+                test_conn = psycopg2.connect(dbname=self.pg_database, user=user.lower(), password=password, host=self.pg_host, port=self.pg_port)
                 test_conn.close()
             except:
                 self.message_window(f'Senha fornecida não é válida para o usuário {user.lower()}')
@@ -743,8 +752,8 @@ class Oracle2Postgres(tk.Toplevel):
             query = f"SELECT table_name FROM all_tables WHERE owner = '{user}'"
         else:
             query = f"SELECT table_name FROM user_tables"
-        tables = self.execute_spark_query('ora', query)
-        tables = [tables[i]['TABLE_NAME'] for i in range(len(tables))]
+        tables = self.execute_query('ora', query)
+        tables = [tables[i][0] for i in range(len(tables))]
 
         # Seleção de tabelas
         ttk.Label(self, text='Tabelas disponiveis para migração\nSelecione as tabelas que deseja migrar:').pack(padx=20, pady=10)
@@ -796,8 +805,8 @@ class Oracle2Postgres(tk.Toplevel):
             self.pg_schema = 'public'
         existing_tables = []
         tables = []
-        pg_schemas = self.execute_spark_query('pg', 'SELECT nspname FROM pg_namespace')
-        pg_schemas = [pg_schemas[i]['nspname'] for i in range(len(pg_schemas))]
+        pg_schemas = self.execute_query('pg', 'SELECT nspname FROM pg_namespace')
+        pg_schemas = [pg_schemas[i][0] for i in range(len(pg_schemas))]
         # Checa se o schema existe no postgres
         if self.pg_schema not in pg_schemas:
             # Se o schema não existir, checa se o usuário tem permissão para criar schemas
@@ -807,8 +816,8 @@ class Oracle2Postgres(tk.Toplevel):
                         JOIN pg_user e \
                         ON a.grantee = e.usesysid \
                         WHERE e.usename = '{self.pg_user}' and datname = '{self.pg_database}'"
-                perm = self.execute_spark_query('pg', query)
-                perm = [perm[i]['privilege_type'] for i in range(len(perm))]
+                perm = self.execute_query('pg', query)
+                perm = [perm[i][2] for i in range(len(perm))]
                 if 'CREATE' not in perm:
                     message = f"Usuário {self.pg_user} não tem permissão para criar o schema {self.pg_schema}\nLogue com um usuário com as devidas permissões!"
                     self.message_window(message)
@@ -830,8 +839,8 @@ class Oracle2Postgres(tk.Toplevel):
                     JOIN pg_user e \
                     ON a.grantee = e.usesysid \
                     WHERE e.usename = '{self.pg_user}' and nspname = '{self.pg_schema}'"
-            perm = self.execute_spark_query('pg', query)
-            perm = [perm[i]['privilege_type'] for i in range(len(perm))]
+            perm = self.execute_query('pg', query)
+            perm = [perm[i][2] for i in range(len(perm))]
             if 'CREATE' not in perm:
                 message = f'Usuário {self.pg_user} não tem permissão para criar tabelas no schema {self.pg_schema}!\nLogue com um usuário com as devidas permissôes!'
                 self.message_window(message)
@@ -840,8 +849,8 @@ class Oracle2Postgres(tk.Toplevel):
                 return
         # Coleta tabelas existentes no schema alvo
         query = f'''SELECT table_name FROM information_schema.tables WHERE table_schema = '{self.pg_schema}' '''
-        pg_tables = self.execute_spark_query('pg', query)
-        pg_tables = [pg_tables[i]['table_name'] for i in range(len(pg_tables))]
+        pg_tables = self.execute_query('pg', query)
+        pg_tables = [pg_tables[i][0] for i in range(len(pg_tables))]
         for i in table_listbox.curselection():
             tables.append([self.user, table_listbox.get(i)])
         for table in tables:
@@ -906,17 +915,17 @@ class Oracle2Postgres(tk.Toplevel):
                 sources = []
                 for table in tables:
                     query = f"SELECT DISTINCT owner, name, type FROM all_dependencies WHERE referenced_name = '{table[1]}' AND owner = '{table[0]}'"
-                    dependencies = self.execute_spark_query('ora', query)
+                    dependencies = self.execute_query('ora', query)
                     for i in range(len(dependencies)):
-                        sources.append([dependencies[i]['OWNER'], dependencies[i]['NAME'], dependencies[i]['TYPE']])
-                        self.deleted_objects.append([dependencies[i]['OWNER'], dependencies[i]['NAME'], dependencies[i]['TYPE']])
-                        textbox.insert(tk.END, f"{dependencies[i]['OWNER']}.{dependencies[i]['NAME']}    {dependencies[i]['TYPE']}\n")
+                        sources.append([dependencies[i][0], dependencies[i][1], dependencies[i][2]])
+                        self.deleted_objects.append([dependencies[i][0], dependencies[i][1], dependencies[i][2]])
+                        textbox.insert(tk.END, f"{dependencies[i][0]}.{dependencies[i][1]}    {dependencies[i][2]}\n")
             
             # Migra todos os procedimentos
             elif s_mode.get() == 1:
                 query = f"SELECT DISTINCT owner, name, type FROM all_dependencies WHERE owner = '{self.user}'"
-                sources = self.execute_spark_query('ora', query)
-                sources = [[sources[i]['OWNER'], sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
+                sources = self.execute_query('ora', query)
+                sources = [[sources[i][0], sources[i][1], sources[i][2]] for i in range(len(sources))]
                 for source in sources:
                     textbox.insert(tk.END, f'{source[0]}.{source[1]}    {source[2]}\n')
 
@@ -937,8 +946,8 @@ class Oracle2Postgres(tk.Toplevel):
             window = tk.Toplevel(self)
             window.geometry('600x400')
             query = f"SELECT name, type FROM all_source where owner = '{self.user}' AND line = 1 UNION SELECT view_name, 'VIEW' FROM all_views where owner = '{self.user}'"
-            sources = self.execute_spark_query('ora', query)
-            sources = [[self.user, sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
+            sources = self.execute_query('ora', query)
+            sources = [[self.user, sources[i][0], sources[i][1]] for i in range(len(sources))]
 
             ttk.Label(window, text='Procedimentos disponiveis para migração\nSelecione quais deseja migrar:').pack(padx=20, pady=10)
             source_frame = ttk.Frame(window, height=300)
@@ -987,50 +996,50 @@ class Oracle2Postgres(tk.Toplevel):
         for table in tables:
             query = f"SELECT DISTINCT table_name, owner FROM all_cons_columns WHERE constraint_name in \
             (SELECT r_constraint_name FROM all_constraints WHERE constraint_type = 'R' AND table_name = '{table[1]}' AND owner = '{table[0]}')"
-            r_tables = self.execute_spark_query('ora', query)
+            r_tables = self.execute_query('ora', query)
             for i in range(len(r_tables)):
-                r_owner = r_tables[i]['OWNER']
-                r_name = r_tables[i]['TABLE_NAME']
+                r_owner = r_tables[i][1]
+                r_name = r_tables[i][0]
                 # Checa se o usuário tem acesso a uma tabela que não o pertence
                 if r_owner != self.user.upper():
                     try:
                         query = f"SELECT * FROM {r_owner}.{r_name} WHERE rownum = 1"
-                        res = self.execute_spark_query('ora', query)
+                        res = self.execute_query('ora', query)
                         if len(res) == 0:
                             raise Exception
                     except:
                         self.message_window(f'Usuário {self.user} Não tem acesso à tabela {r_owner}.{r_name}, migração cancelada!')
                         return
-            r_tables = [[r_tables[i]['OWNER'], r_tables[i]['TABLE_NAME']] for i in range(len(r_tables))]
+            r_tables = [[r_tables[i][1], r_tables[i][0]] for i in range(len(r_tables))]
             for tab in r_tables:
                 if tab not in tables:
-                    dep_tables.add(tab)
+                    dep_tables.add(tuple(tab))
         dep_sources = set()
         if sources:
             # Detecta dependencias entre procedimentos
             for src in selected_sources:
                 query = f"SELECT DISTINCT referenced_name, referenced_type, referenced_owner FROM all_dependencies WHERE name = '{src[1]}' \
                         AND owner = '{src[0]}' AND referenced_type not in ('PACKAGE') AND referenced_owner != 'PUBLIC' AND referenced_owner not like '%SYS%'"
-                dependencies = self.execute_spark_query('ora', query)
+                dependencies = self.execute_query('ora', query)
                 # Checa se o usuário tem acesso a um objeto que não o pertence
                 for i in range(len(dependencies)):
-                    r_owner = dependencies[i]['REFERENCED_OWNER']
-                    r_type = dependencies[i]['REFERENCED_TYPE']
-                    r_name = dependencies[i]['REFERENCED_NAME']
+                    r_owner = dependencies[i][2]
+                    r_type = dependencies[i][1]
+                    r_name = dependencies[i][0]
                     if r_owner != self.user.upper():
                         try:
                             if r_type in ['TABLE', 'VIEW']:
                                 query = f"SELECT * FROM {r_owner}.{r_name} WHERE rownum = 1"
                             else:
                                 query = f"SELECT * FROM all_source WHERE owner = '{r_owner}' AND name = '{r_name}' AND line = 1"
-                            res = self.execute_spark_query('ora', query)
+                            res = self.execute_query('ora', query)
                             if len(res) == 0:
                                 raise Exception
                         except:
                             self.message_window(f'Usuário {self.user} não tem acesso ao {r_type} {r_name}\n \
                                                 referenciado por {src}, migração cancelada!')
                             return
-                dependencies = [[dependencies[i]['REFERENCED_OWNER'], dependencies[i]['REFERENCED_NAME'], dependencies[i]['REFERENCED_TYPE']] for i in range(len(dependencies))]
+                dependencies = [[dependencies[i][2], dependencies[i][0], dependencies[i][1]] for i in range(len(dependencies))]
                 # Detecta se procedimento depende de algum objeto
                 for dep in dependencies:
                     if dep[2] == 'TABLE':
@@ -1046,24 +1055,24 @@ class Oracle2Postgres(tk.Toplevel):
             self.draw_dep_window(dep_tables, tables, dep_sources, selected_sources)
         else:
             query = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{self.pg_schema}'"
-            pg_tables = self.execute_spark_query('pg', query)
+            pg_tables = self.execute_query('pg', query)
             for table in pg_tables:
-                if [self.pg_schema, table['table_name']] in tables:
+                if [self.pg_schema, table[0]] in tables:
                     self.deleted_objects.append([self.pg_schema, table['table_name'], 'TABLE'])
             # Adiciona sources já existentes na base alvo para a lista de objetos removidos
             for source in selected_sources:
                 query = f"select proname, 'PROC/FUNC' as type from pg_proc where proname = '{source[1]}' \
                         union select viewname, 'VIEW' from pg_views where viewname = '{source[1]}' \
                         union select tgname, 'TRIGGER' from pg_trigger where tgname = '{source[1]}'"
-                res = self.execute_spark_query('pg', query)
+                res = self.execute_query('pg', query)
                 if len(res) > 0:
                     found = False
                     for object in self.deleted_objects:
-                        if res[0]['proname'] == object[1]:
+                        if res[0][0] == object[1]:
                             found = True
                             break
                     if not found:
-                        self.deleted_objects.append([self.pg_schema, res[0]['proname'], res[0]['type']])
+                        self.deleted_objects.append([self.pg_schema, res[0][0], res[0][1]])
             self.list_objects(tables, selected_sources)
 
     # Lista dependencias entre os objetos escolhidos e pede permissão para incluí-los à migração
@@ -1078,7 +1087,7 @@ class Oracle2Postgres(tk.Toplevel):
         textBox.pack(pady=10)
         for table in dep_tables:
             textBox.insert(tk.END, f'{table[0]}.{table[1]}    TABLE\n')
-            sel_tables.append(table)
+            sel_tables.append(list(table))
         for src in dep_sources:
             textBox.insert(tk.END, f'{src[0]}.{src[1]}    {src[2]}\n')
             sel_sources.append(list(src))
@@ -1124,8 +1133,8 @@ class Oracle2Postgres(tk.Toplevel):
     # Inicializa a sessão de etl e começa a migrar
     @threaded
     def begin_etl_session(self, tables, sources):
-        pg_conf = {'host': self.pg_host, 'port': self.pg_port,'user': self.pg_user, 'password': self.pg_password, 'database': self.pg_database}
-        ora_conf = {'host': self.ora_host, 'port': self.ora_port, 'user': self.ora_user, 'password': self.ora_password, 'service': self.ora_service}
+        pg_conf = {'host': self.pg_host, 'port': self.pg_port,'user': self.pg_user, 'password': self.pg_password, 'database': self.pg_database, 'url': self.pg_url}
+        ora_conf = {'host': self.ora_host, 'port': self.ora_port, 'user': self.ora_user, 'password': self.ora_password, 'service': self.ora_service, 'url': self.ora_url}
         if not self.full_backup:
             self.write2log(f'Criando backup do schema {self.pg_schema}')
             if self.create_backup(self.pg_schema):
@@ -1195,12 +1204,18 @@ class Postgres2Oracle(tk.Toplevel):
         self.etl.stop()
         self.destroy()
 
-    def execute_spark_query(self, type, query):
+    def execute_query(self, type, query):
         try:
             if type == 'pg':
-                res = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query=query).load().collect()
+                cur = self.pg_conn.cursor()
+                cur.execute(query)
+                res = cur.fetchall()
+                cur.close()
             elif type == 'ora':
-                res = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+                cur = self.ora_conn.cursor()
+                cur.execute(query)
+                res = cur.fetchall()
+                cur.close()
             return res
         except Exception as e:
             print('Error' + str(e))
@@ -1311,8 +1326,8 @@ class Postgres2Oracle(tk.Toplevel):
         # Coleta schemas da base de dados atual aos quais o usuário tem acesso
         query = "SELECT nspname FROM pg_namespace ns WHERE pg_catalog.has_schema_privilege(current_user, ns.nspname, 'USAGE') = 'true' \
                 AND ns.nspname != 'information_schema' AND ns.nspname not like 'pg_%'"
-        schemas = self.execute_spark_query('pg', query)
-        schemas = [schemas[i]['nspname'] for i in range(len(schemas))]
+        schemas = self.execute_query('pg', query)
+        schemas = [schemas[i][0] for i in range(len(schemas))]
 
         ttk.Label(self, text='Selecione o schema que deseja migrar').pack(padx=20, pady=10)
         user_frame = ttk.Frame(self, height=300)
@@ -1349,8 +1364,8 @@ class Postgres2Oracle(tk.Toplevel):
                 self.user = schema
             elif self.migration_mode.get() != 2:
                 return
-            self.ora_users = self.execute_spark_query('ora', "SELECT username FROM all_users WHERE oracle_maintained == 'N'")
-            self.ora_users = [self.ora_users[i]['USERNAME'] for i in range(len(self.ora_users))]
+            self.ora_users = self.execute_query('ora', "SELECT username FROM all_users WHERE oracle_maintained == 'N'")
+            self.ora_users = [self.ora_users[i][0] for i in range(len(self.ora_users))]
             # Migração de usuário/schema
             if self.migration_mode.get() > 0 and not self.ora_dba:
                     self.message_window('Para migrar um schema ou usuário, por favor logue como um usuário DBA Oracle!')
@@ -1392,24 +1407,24 @@ class Postgres2Oracle(tk.Toplevel):
                 JOIN pg_namespace AS nsp ON pc.pronamespace = nsp.oid \
                 JOIN pg_roles AS rol ON pc.proowner = rol.oid \
                 WHERE nsp.nspname NOT LIKE 'pg_%' AND nsp.nspname != 'information_schema' AND rol.rolname = '{user}'"
-        self.objects = self.execute_spark_query('pg', query)
+        self.objects = self.execute_query('pg', query)
         for object in self.objects:
-            if object['object_type'] == 'TABLE':
+            if object[3] == 'TABLE':
                 # Coleta triggers associados as tabelas
                 query = f"SELECT tg.tgname FROM pg_trigger tg \
                         JOIN pg_class AS cls ON tg.tgrelid = cls.oid \
                         JOIN pg_namespace AS ns ON ns.oid = cls.relnamespace \
-                        WHERE cls.relname = '{object['object_name']}' \
-                        AND ns.nspname = '{object['object_schema']}'\
+                        WHERE cls.relname = '{object[1]}' \
+                        AND ns.nspname = '{object[0]}'\
                         AND tg.tgisinternal = 'false'"
-                obj_trig = self.execute_spark_query('pg', query)
-                obj_trig = [obj_trig[i]['tgname'] for i in range(len(obj_trig))]
+                obj_trig = self.execute_query('pg', query)
+                obj_trig = [obj_trig[i][0] for i in range(len(obj_trig))]
                 object['trigger'] = {}
                 for trig in obj_trig:
                     # Coleta função do trigger
                     query = f"SELECT pc.proname FROM pg_trigger tg JOIN pg_proc as pc ON tg.tgfoid = pc.oid WHERE tg.tgname = '{trig}'"
-                    func = self.execute_spark_query('pg', query)
-                    object['trigger'][trig] = func[0]['proname']
+                    func = self.execute_query('pg', query)
+                    object['trigger'][trig] = func[0][0]
         window = tk.Toplevel(self)
         ttk.Label(window, text=f'Objetos pertencentes ao usuário {user}:')
         box_frame = ttk.Frame(window)
@@ -1501,35 +1516,35 @@ class Postgres2Oracle(tk.Toplevel):
     def migrate_schema(self, schema, delete=False, new_user=False, new_user_pass='', new_dba_user=False):
         cur = self.ora_conn.cursor()
         query = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema}'"
-        tables = self.execute_spark_query('pg', query)
-        tables = [[schema, [tables[i]['table_name']]] for i in range(len(tables))]
+        tables = self.execute_query('pg', query)
+        tables = [[schema, [tables[i][0]]] for i in range(len(tables))]
         sources = []
         # Adiciona procedimentos/funções do schema
         query = f"SELECT proname, prokind FROM pg_proc pc JOIN pg_namespace AS ns ON pc.pronamespace = ns.oid \
                 WHERE ns.nspname = '{schema}'"
-        sources_aux = self.execute_spark_query('pg', query)
+        sources_aux = self.execute_query('pg', query)
         for i in range(len(sources_aux)):
-            if sources_aux[i]['prokind'] == 'f':
-                sources.append([schema, sources_aux[i]['proname'], 'FUNCTION'])
-            elif sources_aux[i]['prokind'] == 'p':
-                sources.append([schema, sources_aux[i]['proname'], 'PROCEDURE'])
+            if sources_aux[i][1] == 'f':
+                sources.append([schema, sources_aux[i][0], 'FUNCTION'])
+            elif sources_aux[i][1] == 'p':
+                sources.append([schema, sources_aux[i][0], 'PROCEDURE'])
         # Adicions views do schema
         query = f"SELECT viewname FROM pg_views WHERE schemaname = '{schema}'"
-        sources_aux = self.execute_spark_query('pg', query)
+        sources_aux = self.execute_query('pg', query)
         for source in sources_aux:
-            sources.append([schema, source['viewname'], 'VIEW'])
+            sources.append([schema, source[0], 'VIEW'])
         # Adiciona trigger relacionados as tabelas do schema
         query = f"SELECT tgname FROM pg_catalog.pg_trigger tg JOIN pg_class AS cls \
                 ON tg.tgrelid = cls.oid JOIN information_schema.tables AS tbl \
                 ON cls.relname = tbl.table_name WHERE tbl.table_schema = '{schema}' \
                 AND tg.tgisinternal = 'false'"
-        sources_aux = self.execute_spark_query('pg', query)
+        sources_aux = self.execute_query('pg', query)
         for source in sources_aux:
-            sources.append([schema, source['tgname'], 'TRIGGER'])
+            sources.append([schema, source[0], 'TRIGGER'])
             # Adiciona funções de trigger
             query = f"SELECT pc.proname FROM pg_trigger tg JOIN pg_proc as pc ON tg.tgfoid = pc.oid WHERE tg.tgname = '{source}'"
-            func = self.execute_spark_query('pg', query)
-            sources.append([func[0]['proname'], 'FUNCTION'])
+            func = self.execute_query('pg', query)
+            sources.append([func[0][0], 'FUNCTION'])
         if len(tables) > 0 or len(sources) > 0:
             if delete:
                 cur.execute(f'DROP USER {schema} CASCADE')
@@ -1566,8 +1581,8 @@ class Postgres2Oracle(tk.Toplevel):
                     (SELECT cls.relname FROM pg_constraint con JOIN pg_class cls ON con.conIndid = cls.oid WHERE con.conname IN \
                     (SELECT constraint_name FROM information_schema.table_constraints WHERE table_schema = '{table[0]}' \
                     AND table_name = '{table[1]}' AND constraint_type = 'FOREIGN KEY'))"
-            r_tables = self.execute_spark_query('pg', query)
-            r_tables = [[r_tables[i]['table_name'], r_tables[i]['table_schema']] for i in range(len(r_tables))]
+            r_tables = self.execute_query('pg', query)
+            r_tables = [[r_tables[i][1], r_tables[i][0]] for i in range(len(r_tables))]
             for dep in r_tables:
                 if dep[0] not in tables:
                     dep_tables.add(dep)
@@ -1593,8 +1608,8 @@ class Postgres2Oracle(tk.Toplevel):
                             WHERE schemaname = '{src[0]}' AND viewname = '{src[1]}') as body \
                             ON position(CASE WHEN names.schema != 'public' THEN COALESCE(names.schema || '.' || names.name, '') \
                             ELSE names.name END in body.func_def) > 0"
-                    dependencies = self.execute_spark_query('pg', query)
-                    dependencies = [[dependencies[i]['schema'], dependencies[i]['name'], dependencies[i]['type']] for i in range(len(dependencies))]
+                    dependencies = self.execute_query('pg', query)
+                    dependencies = [[dependencies[i][0], dependencies[i][1], dependencies[i][2]] for i in range(len(dependencies))]
                     # Detecta se procedimento depende de uma tabela ou outro procedimento
                     for dep in dependencies:
                         if dep[2] == 'TABLE':
@@ -1606,12 +1621,12 @@ class Postgres2Oracle(tk.Toplevel):
                     # Checa se as tabelas relacionadas aos triggers estão inclusas
                     query = f"SELECT ns.nspname, cls.relname FROM pg_trigger tg JOIN pg_class AS cls ON tg.tgrelid = cls.oid \
                             JOIN pg_namespace AS ns ON cls.relnamespace = ns.oid WHERE tg.tgname = '{src[1]}'"
-                    trig_dep = self.execute_spark_query('pg', query)
+                    trig_dep = self.execute_query('pg', query)
                     for tab in trig_dep:
                         if tab not in tables:
                             dep_tables.add(tab)
                     # Checa se existe alguma sequencia referenciada pela função do trigger
-                    query = f"SELECT cls.relname, ns.nspname FROM pg_class cls JOIN pg_namespace AS ns \
+                    query = f"SELECT ns.nspname, cls.relname FROM pg_class cls JOIN pg_namespace AS ns \
                             ON cls.relnamespace = ns.oid WHERE cls.relname IN \
                             (SELECT relname FROM \
                             (SELECT cls.relname FROM pg_sequence seq JOIN pg_class AS cls \
@@ -1625,8 +1640,8 @@ class Postgres2Oracle(tk.Toplevel):
                             ON tgr.tgfoid = pr.oid WHERE tgr.tgname = '{src[1]}' \
                             )) AS body \
                             ON position(names.relname IN body.func_def) > 0)"
-                    seq_dep = self.execute_spark_query('pg', query)
-                    seq_dep = [[seq_dep[i]['nspname'], seq_dep[i]['relname']] for i in range(len(seq_dep))]
+                    seq_dep = self.execute_query('pg', query)
+                    seq_dep = [[seq_dep[i][0], seq_dep[i][1]] for i in range(len(seq_dep))]
                     for seq in seq_dep:
                         sources.append([seq[0], seq[1], 'SEQUENCE'])
             dep_sources = list(dep_sources)

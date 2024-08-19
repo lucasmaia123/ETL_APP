@@ -5,7 +5,8 @@ from pyspark.sql.functions import *
 import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
-import jaydebeapi
+import psycopg2
+import oracledb
 import os
 import sys
 import pathlib
@@ -43,16 +44,21 @@ class ETL_session_UI(tk.Toplevel):
             super().__init__(master)
             self.protocol('WM_DELETE_WINDOW', self.stop_etl)
             # Strings de conexão de acordo com o padrão jdbc
-            # pg_url = f"jdbc:postgresql://{pg_host}:{pg_port}/{pg_database}?user={pg_user}&password={pg_password}"
-            self.pg_url = f"jdbc:postgresql://{pg_conf['host']}:{pg_conf['port']}/{pg_conf['database']}"
+            self.pg_url = pg_conf['url']
+            self.pg_database = pg_conf['database']
             # ora_url = f"jdbc:oracle:thin:{ora_user}/{ora_password}@//{ora_host}:{ora_port}/{ora_database}"
-            self.ora_url = f"jdbc:oracle:thin:@//{ora_conf['host']}:{ora_conf['port']}/{ora_conf['service']}"
+            self.ora_url = ora_conf['url']
+            self.ora_service = ora_conf['service']
             self.pg_driver = "org.postgresql.Driver"
             self.ora_driver = "oracle.jdbc.driver.OracleDriver"
             self.ora_user = ora_conf['user']
             self.ora_password = ora_conf['password']
             self.pg_user = pg_conf['user']
             self.pg_password = pg_conf['password']
+            self.pg_host = pg_conf['host']
+            self.ora_host = ora_conf['host']
+            self.pg_port = pg_conf['port']
+            self.ora_port = ora_conf['port']
             self.user = user
             self.tables = tables
             self.sources = sources
@@ -65,8 +71,11 @@ class ETL_session_UI(tk.Toplevel):
             # Conexões genéricas para execução de DML/DDL (PySpark apenas executa queries para coleta de dados)
             # (auto-commit ON, usar a função commit() ou fetch() em operações DML/DDL causará erro,
             #  operações DML/DDL executadas seram aplicadas na base de dados automaticamente!)
-            self.pg_conn = jaydebeapi.connect(self.pg_driver, self.pg_url, [pg_conf['user'], pg_conf['password']], pg_jar)
-            self.oracle_conn = jaydebeapi.connect(self.ora_driver, self.ora_url, [ora_conf['user'], ora_conf['password']], ora_jar)
+            self.pg_conn = psycopg2.connect(dbname=self.pg_database, user=self.pg_user, password=self.pg_password, host=self.pg_host, port=self.pg_port)
+            if self.ora_user.lower() == 'sys':
+                self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=oracledb.AUTH_MODE_SYSDBA)
+            else:
+                self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=oracledb.AUTH_MODE_DEFAULT)
         except Exception as e:
             print("Erro de conexão: " + str(e))
 
@@ -89,7 +98,10 @@ class ETL_session_UI(tk.Toplevel):
             if type == 'pg':
                 res = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query=query).load().collect()
             elif type == 'ora':
-                res = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+                if self.ora_user.lower() == 'sys':
+                    res = self.etl.read.format('jdbc').options(driver=self.ora_driver, user='sys as sysdba', password=self.ora_password, url=self.ora_url, query=query).load().collect()
+                else:
+                    res = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
             return res
         except Exception as e:
             print('Error' + str(e))
@@ -156,7 +168,7 @@ class Oracle2PostgresETL(ETL_session_UI):
             self.pg_password = self.setup['connect']['password']
             self.pg_database = self.setup['connect']['database']
             cur.close()
-            self.pg_conn = jaydebeapi.connect(self.pg_driver, self.pg_url, [self.pg_user, self.pg_password], self.pg_jar)
+            self.pg_conn = psycopg2.connect(dbname=self.pg_database, user=self.pg_user, password=self.pg_password, host=self.pg_host, port=self.pg_port)
             cur = self.pg_conn.cursor()
         if self.setup['create_schema']:
             schema = self.setup['create_schema']
@@ -259,7 +271,11 @@ class Oracle2PostgresETL(ETL_session_UI):
         self.write2display(f'Coletando {table_schema}.{table_name}...')
         table_data = {}
         # Pega informações sobre as colunas da tabela
-        data = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, dbtable=f'{table_schema.lower()}.{table_name.lower()}').load()
+        if self.ora_user.lower() == 'sys':
+            user = 'sys as sysdba'
+        else:
+            user = self.ora_user.lower()
+        data = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=user, password=self.ora_password, url=self.ora_url, dbtable=f'{table_schema.lower()}.{table_name.lower()}').load()
         # Muda os nomes das tabelas para letras minusculas
         data = data.select([col(x).alias(x.lower()) for x in data.columns])
         table_data['data'] = data
