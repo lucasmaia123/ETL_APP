@@ -72,10 +72,12 @@ class ETL_session_UI(tk.Toplevel):
             # (auto-commit ON, usar a função commit() ou fetch() em operações DML/DDL causará erro,
             #  operações DML/DDL executadas seram aplicadas na base de dados automaticamente!)
             self.pg_conn = psycopg2.connect(dbname=self.pg_database, user=self.pg_user, password=self.pg_password, host=self.pg_host, port=self.pg_port)
+            self.pg_conn.autocommit = True
             if self.ora_user.lower() == 'sys':
                 self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=oracledb.AUTH_MODE_SYSDBA)
             else:
                 self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=oracledb.AUTH_MODE_DEFAULT)
+            self.ora_conn.autocommit = True
         except Exception as e:
             print("Erro de conexão: " + str(e))
 
@@ -123,10 +125,10 @@ class ETL_session_UI(tk.Toplevel):
             process.cancel()
             del process
         self.S.acquire()
-        if not self.pg_conn._closed:
+        if not self.pg_conn.closed:
             self.pg_conn.close()
-        if not self.oracle_conn._closed:
-            self.oracle_conn.close()
+        if self.ora_conn:
+            self.ora_conn.close()
         self.destroy()
         self.S.release()
 

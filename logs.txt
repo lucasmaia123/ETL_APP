@@ -62,3 +62,16 @@
 19/08/2024 12:29:20 Sessão 8772489206877: migrando tabelas [['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
 19/08/2024 12:30:54 Sessão 8772489206877: Migração falhou! Retornando base de dados para estado anterior...
 19/08/2024 12:30:55 Sessão 8772489206877: Base de dados retornada ao último estado estável
+20/08/2024 09:01:42 Sessão 8752770918761: Iniciando sessão 8752768911137 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+20/08/2024 09:02:05 Sessão 8752770918761: Criando backup do schema public
+20/08/2024 09:02:05 Sessão 8752770918761: Iniciando sessão 8752768911137 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+20/08/2024 09:02:05 Sessão 8752770918761: migrando tabelas [['LUCAS', 'EMPLOYEES']] e sources [] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+20/08/2024 09:02:10 Sessão 8752770918761: Migração concluída com sucesso!
+20/08/2024 09:02:10 Sessão 8752770918761: Terminada sessão de ETL 8752768181489
+20/08/2024 09:08:21 Sessão 8791634446361: Iniciando sessão 8791635122117 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+20/08/2024 09:08:35 Sessão 8791634446361: Criando backup do schema public
+20/08/2024 09:08:36 Sessão 8791634446361: Iniciando sessão 8791635122117 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+20/08/2024 09:08:36 Sessão 8791634446361: migrando tabelas [['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE']] do Oracle schema 'LUCAS' para Postgres database postgres schema 'public'!
+20/08/2024 09:08:43 Sessão 8791634446361: Migração concluída com sucesso!
+20/08/2024 09:08:43 Sessão 8791634446361: Terminada sessão de ETL 8791633324361
+20/08/2024 12:25:05 Sessão 8758362657873: Iniciando sessão 8758358139557 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres

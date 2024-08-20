@@ -1,5 +1,6 @@
 altgraph==0.17.4
-JayDeBeApi==1.2.3
+psycopg2
+oracledb
 JPype1==1.5.0
 packaging==24.1
 py4j==0.10.9.7
