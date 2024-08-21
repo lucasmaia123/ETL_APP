@@ -75,3 +75,6 @@
 20/08/2024 09:08:43 Sessão 8791634446361: Migração concluída com sucesso!
 20/08/2024 09:08:43 Sessão 8791634446361: Terminada sessão de ETL 8791633324361
 20/08/2024 12:25:05 Sessão 8758362657873: Iniciando sessão 8758358139557 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+21/08/2024 12:36:55 Sessão 8737695204465: Iniciando sessão 8737692133053 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+21/08/2024 12:39:33 Sessão 8783334307917: Iniciando sessão 8783328926017 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+21/08/2024 12:41:30 Sessão 8743032232369: Iniciando sessão 8743029485117 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
