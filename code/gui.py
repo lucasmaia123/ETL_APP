@@ -1223,17 +1223,118 @@ class Oracle2PostgresDirect(tk.Toplevel):
         textBox.config(state='disabled')
         lower_frame = ttk.Frame(window)
         lower_frame.pack()
-        ttk.Button(lower_frame, text='Concordar', command=lambda: [self.list_objects(sel_tables, sel_sources), window.destroy()]).pack(side='right', padx=20, pady=10)
+        ttk.Button(lower_frame, text='Concordar', command=lambda: [self.select_columns_window(sel_tables, sel_sources), window.destroy()]).pack(side='right', padx=20, pady=10)
         ttk.Button(lower_frame, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=10)
 
-    # Lista as tabelas da migração e permite filtrar quais colunas seram migradas
+    # Lista as tabelas da migração e permite filtrar quais colunas e dados seram migrados
     def select_columns_window(self, tables, sources):
-        self.table_query = {}
+        self.table_data = {}
         self.table_config = {}
-        buttons = []
         window = tk.Toplevel(self)
-        ttk.Label(window, text='Selecione quais colunas de cada tabela especifica devem ser migradas:')
+        ttk.Label(window, text='Selecione quais colunas de cada tabela especifica devem ser migradas:').pack(padx=10, pady=10)
         
+        # Frame scrollavel para widgets
+        scrollBar = ttk.Scrollbar(window, orient='vertical')
+        scrollBar.pack(side='right', fill='y')
+        canvas = tk.Canvas(window, width=400, height=300)
+        canvas.pack(fill='x', expand=True)
+
+        scrollBar.configure(command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollBar.set)
+
+        scrollFrame = tk.Frame(canvas, bg='white')
+        scrollFrame.pack(fill='both', expand=True)
+        scrollFrame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        # ???
+        frame = canvas.create_window((0, 0), window=scrollFrame, anchor='nw')
+
+        for i, table in enumerate(tables):
+            table_name = deepcopy(table[1])
+            schema = deepcopy(table[0])
+            ttk.Label(scrollFrame, text=f'{schema}.{table_name}').grid(row=i, column=0)
+
+            self.table_config[f'{schema}.{table_name}'] = tk.StringVar()
+            self.table_data[f'{schema}.{table_name}'] = {}
+            self.table_data[f'{schema}.{table_name}']['columns'] = []
+            self.table_data[f'{schema}.{table_name}']['conditions'] = {}
+            cbref = ttk.Checkbutton(scrollFrame, text='Todas as colunas/linhas', variable=self.table_config[f'{schema}.{table_name}'], onvalue='all')
+            cbref.grid(row=i, column=1)
+            ttk.Checkbutton(scrollFrame, text='Apenas esqueleto', variable=self.table_config[f'{schema}.{table_name}'], onvalue='none').grid(row=i, column=2)
+            ttk.Checkbutton(scrollFrame, text='Customizado', variable=self.table_config[f'{schema}.{table_name}'], onvalue='custom', command=lambda table_name=table_name, schema=schema:self.customize_columns(table_name, schema)).grid(row=i, column=3)
+            cbref.invoke()
+
+        ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)
+        ttk.Button(window, text='Prosseguir', command=lambda:self.collect_table_data(tables, sources)).pack(side='right', padx=20, pady=20)
+
+    def collect_table_data(self, tables, sources):
+        pass
+        '''
+        window = tk.Toplevel(self)
+        ttk.Label(window, text='Query das tabelas sendo migradas:').pack(padx=10, pady=10)
+        for table in tables:
+            ttk.Label(window, text=f'{table[0]}.{table[1]}')
+            if self.table_config != 'none':
+                query = self.table_query[f'{table[0]}.{table[1]}']
+                res = self.execute_query('ora', query)
+                ttk.Label(window, text=query).pack()
+                ttk.Label(window, text=res).pack()
+            else:
+                ttk.Label(window, text='Null').pack()
+        ttk.Button(window, text='Ok', command=window.destroy).pack(padx=10, pady=10)
+        '''
+
+    # Customiza quais colunas/dados seram migrados para uma tabela especifica
+    def customize_columns(self, table, schema):
+        query = f"SELECT cols.column_name, cols.data_type, \
+                CASE cons.constraint_type \
+                    WHEN 'P' THEN 'Primary key' \
+                    WHEN 'R' THEN 'Foreign key' \
+                    ELSE '' END AS constraint_type \
+                FROM all_tab_columns cols \
+                JOIN all_cons_columns cc ON cols.column_name = cc.column_name AND cols.table_name = cc.table_name \
+                JOIN all_constraints cons ON cons.constraint_name = cc.constraint_name \
+                WHERE cols.owner = '{schema}' AND cols.table_name = '{table}'"
+        res = self.execute_query('ora', query)
+        columns = [[res[i][0], res[i][1], res[i][2]] for i in range(len(res))]
+
+        window = tk.Toplevel(self)
+        ttk.Label(window, text=f'Especifique quais colunas da tabela {schema}.{table} devem ser migradas:').pack(padx=10, pady=10)
+        list_frame = ttk.Frame(window, height=300)
+        list_frame.pack(fill='x', expand=True)
+
+        scrollBar = tk.Scrollbar(list_frame, orient='vertical')
+        scrollBar.pack(side='right', fill='y')
+
+        listbox = tk.Listbox(list_frame, selectmode='multiple', exportselection=False, yscrollcommand=scrollBar.set)
+        listbox.pack(padx=10, pady=10, expand=True, fill='both')
+
+        for column in columns:
+            listbox.insert(tk.END, f'{column[0]}    {column[1]}    {column[2]}')
+
+        scrollBar.config(command=listbox.yview)
+        listbox.select_set(0, tk.END)
+
+        ttk.Label(window, text='Utilize este butão para filtrar quais dados serão migrados em relação as colunas').pack(padx=10, pady=10)
+        ttk.Button(window, text='Customizar condições', command=lambda:self.customize_conditions(table, schema, listbox, conditionals_display)).pack(padx=10)
+        conditionals_display = tk.Text(window, width=30, height=5, state='disabled')
+        conditionals_display.pack(padx=10, pady=10)
+        ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)
+        ttk.Button(window, text='Testar query', command=lambda: self.test_custom_query(schema, table, columns.get())).pack(side='right', padx=20, pady=20)
+
+    # Lista opções de filtragem para cada coluna de acordo com o seu tipo
+    def customize_conditions(self, table, schema, columns, display):
+        data_aux = []
+        for i in columns.curselection():
+            data_aux.append(columns.get(i))
+        if len(data_aux) == 0:
+            return
+        column_data = []
+        for data in data_aux:
+            column_data.append(data.split())
+
+        window = tk.Toplevel(self)
+        ttk.Label(window, text='Condições para as colunas selecionadas:').pack(padx=10, pady=10)
+
         # Frame scrollavel para widgets
         scrollBar = ttk.Scrollbar(window, orient='vertical')
         scrollBar.pack(side='right', fill='y')
@@ -1249,70 +1350,66 @@ class Oracle2PostgresDirect(tk.Toplevel):
         # ???
         frame = canvas.create_window((0, 0), window=scrollFrame, anchor='nw')
 
-        for i, table in enumerate(tables):
-            ttk.Label(scrollFrame, text=f'{table[0]}.{table[1]}').grid(row=i, column=0)
+        operation_type = {}
+        column_widgets = {}
+        checkbuttons = []
 
-            self.table_config[f'{table[0]}.{table[1]}'] = tk.StringVar()
-            self.table_query[f'{table[0]}.{table[1]}'] = f'SELECT * FROM {table[0]}.{table[1]}'
-            buttons.append(ttk.Button(scrollFrame, text='Customizar query', command=lambda: self.customize_query(table[1], table[0]), state='disabled'))
-            cbref = ttk.Checkbutton(scrollFrame, text='Todas as colunas/linhas', variable=self.table_config[f'{table[0]}.{table[1]}'], onvalue='all', command=buttons[i].config(state='disabled'))
-            cbref.grid(row=i, column=1)
-            ttk.Checkbutton(scrollFrame, text='Apenas esqueleto', variable=self.table_config[f'{table[0]}.{table[1]}'], onvalue='none', command=buttons[i].config(state='disabled')).grid(row=i, column=2)
-            ttk.Checkbutton(scrollFrame, text='Customizado', variable=self.table_config[f'{table[0]}.{table[1]}'], onvalue='custom', command=buttons[i].config(state='normal')).grid(row=i, column=3)
-            buttons[i].grid(row=i, column=4)
-            cbref.invoke()
-
+        for i, column in enumerate(column_data):
+            column_widgets[column[0]] = {}
+            column_widgets[column[0]]['enabled'] = tk.BooleanVar()
+            checkbuttons.append(ttk.Checkbutton(scrollFrame, text=column[0], variable=column_widgets[f'{column[0]}']['enabled'], onvalue=True, offvalue=False))
+            checkbuttons[-1].grid(row=i, column=0)
+            if column[1] in ('NUMBER', 'INTEGER', 'LONG', 'FLOAT', 'DATE', 'TIMESTAMP', 'RAW'):
+                operation_type[column[0]] = tk.StringVar()
+                column_widgets[column[0]]['operator'] = ttk.Combobox(scrollFrame, textvariable=operation_type[column[0]], values=('=', '!=', '>', '<', '=>', '=<', 'BETWEEN'), state='disabled')
+                column_widgets[column[0]]['operator'].grid(row=i, column=1)
+            elif column[1] in ('VARCHAR', 'VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'):
+                operation_type[column[0]] = tk.StringVar()
+                column_widgets[column[0]]['operator'] = ttk.Combobox(scrollFrame, textvariable=operation_type[column[0]], values=('=', '!=', 'LIKE'), state='disabled')
+                column_widgets[column[0]]['operator'].grid(row=i, column=1)
+            column_widgets[column[0]]['condition'] = ttk.Entry(scrollFrame, width=20, state='disabled')
+            column_widgets[column[0]]['condition'].grid(row=i, column=2)
+            checkbuttons[-1].config(command=lambda widget=column_widgets[column[0]]:self.shit_func(widget=widget))
         ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)
-        ttk.Button(window, text='Prosseguir', command=self.collect_table_data(tables, sources)).pack(side='right', padx=20, pady=20)
+        ttk.Button(window, text='Testar resultado', command=lambda:self.test_custom_query(schema, table, column_data, operation_type, column_widgets, display)).pack(side='right', padx=20, pady=20)
 
-    def collect_table_data(self, tables, sources):
-        window = tk.Toplevel(self)
-        ttk.Label(window, text='Query das tabelas sendo migradas:').pack(padx=10, pady=10)
-        for table in tables:
-            ttk.Label(window, text=f'{table[0]}.{table[1]}')
-            if self.table_config != 'none':
-                query = self.table_query[f'{table[0]}.{table[1]}']
-                res = self.execute_query('ora', query)
-                ttk.Label(window, text=query).pack()
-                ttk.Label(window, text=res).pack()
-            else:
-                ttk.Label(window, text='Null').pack()
-        ttk.Button(window, text='Ok', command=window.destroy).pack(padx=10, pady=10)
+    def shit_func(self, widget):
+        if widget['operator'].cget('state') == 'normal':
+            print(widget['operator'].cget('state'))
+            widget['operator'].config(state = 'disabled')
+        else:
+            print(widget['operator'].cget('state'))
+            widget['operator'].config(state = 'normal')
 
-    # Filtra colunas de uma tabela a partir de uma query
-    def customize_query(self, table, schema):
-        window = tk.Toplevel(self)
-        ttk.Label(window, text='Complete a query:').pack(padx=10, pady=10)
-        ttk.Label(window, text='SELECT').pack(padx=10)
-        columns = ttk.Entry(window, width=30, tooltip = 'Remover chaves primárias ou estrangeiras pode quebrar a base de dados!\nSó mexa se souber o que está fazendo!')
-        columns.pack(padx=10)
-        columns.insert(0, '*')
-        ttk.Button(window, text='Listar colunas', command=lambda: self.list_columns(table, schema)).pack(padx=10)
-        ttk.Label(window, text=f'FROM {schema}.{table}').pack(padx=10)
-        conditionals = tk.Text(window, width=30, height=5)
-        conditional_var = tk.StringVar()
-        conditional_button = ttk.Checkbutton(window, text='WHERE', variable=conditional_var, onvalue='on', offvalue='off')
-        conditional_button.pack(padx=10)
-        conditional_button.bind('<Configure>', lambda e: self.text_area_config(conditionals, conditional_var.get()))
-        conditionals.pack(padx=10)
-        ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)
-        ttk.Button(window, text='Testar query', command=lambda: self.test_custom_query(schema, table, columns.get(), conditionals.get(), conditional_var.get())).pack(side='right', padx=20, pady=20)
+        if widget['condition'].cget('state') == 'normal':
+            widget['condition'].config(state = 'disabled')
+        else:
+            widget['condition'].config(state = 'normal')
 
     # Testa integridade da query (Obs: Filtrar contra injeção de sql!)
-    def test_custom_query(self, schema, table, columns, conditionals, conditional_var):
-        query = f'SELECT {columns} FROM {schema}.{table}'
-        if conditional_var == 'on':
-            query += f'WHERE {conditionals}'
+    def test_custom_query(self, schema, table, column_data, operators, widgets, display):
+        columns = ''
+        conditionals = ''
+        columns_list = [column_data[i][0] for i in range(len(column_data))]
+        for column in columns_list:
+            if columns == '':
+                columns = str(column)
+            columns += f', {str(column)}'
+            if widgets[column]['enabled'].get():
+                if conditionals == '':
+                    conditionals = f"WHERE {column} {operators[column]} {widgets[column]['condition'].get()}"
+                else:
+                    conditionals += f"\nAND {column} {operators[column]} {widgets[column]['condition'].get()}"
+        query = f'SELECT {columns} FROM {schema}.{table} {conditionals}'
         window = tk.Toplevel(self)
-        ttk.Label(window, text=f'Query:\n{query}')
+        ttk.Label(window, text=f'Query:\n{query}').pack(padx=10, pady=10)
         try:
             res = self.execute_query('ora', query)
-            ttk.Label(window, text=f'Result:\n{res}')
-            self.table_query[f'{schema}.{table}'] = query
+            ttk.Label(window, text=f'Result:\n{res}').pack(padx=10, pady=10)
+            display.insert(tk.END, conditionals)
             ttk.Button(window, text='Prosseguir', command=window.destroy).pack(padx=10, pady=10)
         except:
             ttk.Label(window, text='Execução da query falhou, verifique se a query está bem construída!').pack(padx=10, pady=10)
-            self.table_query[f'{schema}.{table}'] = f'SELECT * FROM {schema}.{table}'
             ttk.Button(window, text='Ok', command=window.destroy).pack(padx=10, pady=10)
 
     # Auto explicatório
