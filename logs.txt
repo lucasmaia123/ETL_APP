@@ -95,3 +95,13 @@
 22/08/2024 12:44:19 Sessão 8747497509465: Iniciando sessão 8747493649105 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
 22/08/2024 12:52:03 Sessão 8789016395965: Iniciando sessão 8789014210673 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
 22/08/2024 12:54:31 Sessão 8743993229501: Iniciando sessão 8743956626397 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+23/08/2024 11:04:02 Sessão 8788404358865: Iniciando sessão 8788439067797 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+23/08/2024 11:05:24 Sessão 8743715295997: Iniciando sessão 8743715146081 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+23/08/2024 11:07:28 Sessão 8756702303353: Iniciando sessão 8756698814409 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+23/08/2024 11:10:22 Sessão 8746811942445: Iniciando sessão 8746808389425 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+23/08/2024 11:51:22 Sessão 8754958276029: Iniciando sessão 8754923386313 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+23/08/2024 11:55:37 Sessão 8726394263637: Iniciando sessão 8726389678817 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+23/08/2024 11:58:24 Sessão 8732316750969: Iniciando sessão 8732312185837 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+23/08/2024 12:01:48 Sessão 8743908891265: Iniciando sessão 8743904305841 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+23/08/2024 12:03:45 Sessão 8767074886165: Iniciando sessão 8767071451049 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+23/08/2024 12:06:28 Sessão 8742357121313: Iniciando sessão 8742323649221 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
