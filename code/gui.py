@@ -46,6 +46,10 @@ class etl_UI(tk.Frame):
         self.ora_jar = ora_jar
         self.pg_conn = None
         self.ora_conn = None
+        s = ttk.Style(master)
+        s.configure('White.TRadiobutton', background='white', foreground='black')
+        s.configure('White.TCheckbutton', background='white', foreground='black')
+        s.configure('White.TCombobox', background='white', selectbackground='white')
         self.master.protocol('WM_DELETE_WINDOW', self.end_process)
         self.draw_start_menu()
 
@@ -298,9 +302,9 @@ class etl_UI(tk.Frame):
     # Ferramenta para mensagem de erros
     def message_window(self, message):
         window = tk.Toplevel(self.master)
-        window.title('Error message')
-        ttk.Label(window, text=message).pack(padx=10, pady=10)
-        ttk.Button(window, text='Ok', command=lambda: window.destroy()).pack(side='bottom', pady=10)
+        window.title('Mensagem')
+        ttk.Label(window, text=message).pack(padx=20, pady=10)
+        ttk.Button(window, text='Ok', command=lambda: window.destroy()).pack(side='bottom', padx=10, pady=10)
 
     # Escreve log no logs.txt
     def write2log(self, data):
@@ -1233,36 +1237,39 @@ class Oracle2PostgresDirect(tk.Toplevel):
         ttk.Label(window, text='Selecione como os dados de cada tabela devem ser migrados:').pack(padx=10, pady=10)
         
         # Frame scrollavel para widgets
-        scrollBar = ttk.Scrollbar(window, orient='vertical')
+        outerScrollFrame = tk.Frame(window)
+        outerScrollFrame.pack(fill='x', expand=True)
+        scrollBar = ttk.Scrollbar(outerScrollFrame, orient='vertical')
         scrollBar.pack(side='right', fill='y')
-        canvas = tk.Canvas(window, width=400, height=300)
+        canvas = tk.Canvas(outerScrollFrame)
         canvas.pack(fill='x', expand=True)
 
         scrollBar.configure(command=canvas.yview)
         canvas.configure(yscrollcommand=scrollBar.set)
 
-        scrollFrame = tk.Frame(canvas, bg='white')
-        scrollFrame.pack(fill='both', expand=True)
-        scrollFrame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        innerScrollFrame = tk.Frame(canvas, bg='white')
+        innerScrollFrame.pack(fill='both', expand=True)
+        innerScrollFrame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
         # ???
-        frame = canvas.create_window((0, 0), window=scrollFrame, anchor='nw')
+        frame = canvas.create_window((0, 0), window=innerScrollFrame, anchor='nw')
 
         for i, table in enumerate(tables):
             table_name = deepcopy(table[1])
             schema = deepcopy(table[0])
             self.table_data[f'{schema}.{table_name}'] = {}
-            ttk.Label(scrollFrame, text=f'{schema}.{table_name}').grid(row=i, column=0)
+            ttk.Label(innerScrollFrame, text=f'{schema}.{table_name}', background='white').grid(row=i, column=0, padx=5)
 
             self.table_data[f'{schema}.{table_name}']['config'] = tk.StringVar()
             self.table_data[f'{schema}.{table_name}']['filter'] = {}
-            cbref = ttk.Checkbutton(scrollFrame, text='Todos os dados', variable=self.table_data[f'{schema}.{table_name}']['config'], onvalue='all')
-            cbref.grid(row=i, column=1)
-            ttk.Checkbutton(scrollFrame, text='Apenas esqueleto', variable=self.table_data[f'{schema}.{table_name}']['config'], onvalue='none').grid(row=i, column=2)
-            ttk.Checkbutton(scrollFrame, text='Customizado', variable=self.table_data[f'{schema}.{table_name}']['config'], onvalue='custom', command=lambda table_name=table_name, schema=schema:self.customize_column_data(table_name, schema)).grid(row=i, column=3)
-            cbref.invoke()
+            rbref = ttk.Radiobutton(innerScrollFrame, text='Todos os dados', variable=self.table_data[f'{schema}.{table_name}']['config'], value='all', style='White.TRadiobutton')
+            rbref.grid(row=i, column=1, padx=5)
+            ttk.Radiobutton(innerScrollFrame, text='Apenas esqueleto', variable=self.table_data[f'{schema}.{table_name}']['config'], value='none', style='White.TRadiobutton').grid(row=i, column=2, padx=5)
+            ttk.Radiobutton(innerScrollFrame, text='Customizado', variable=self.table_data[f'{schema}.{table_name}']['config'], value='custom', command=lambda table_name=table_name, schema=schema:self.customize_column_data(schema, table_name), style='White.TRadiobutton').grid(row=i, column=3, padx=5)
+            rbref.invoke()
 
         ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)
         ttk.Button(window, text='Prosseguir', command=lambda:self.collect_table_data(tables, sources)).pack(side='right', padx=20, pady=20)
+        window.update()
 
     def collect_table_data(self, tables, sources):
         pass
@@ -1282,72 +1289,107 @@ class Oracle2PostgresDirect(tk.Toplevel):
         '''
 
     # Customiza quais dados de colunas especificas devem ser migrados
-    def customize_column_data(self, table, schema):
+    def customize_column_data(self, schema, table):
         query = f"SELECT column_name, data_type FROM all_tab_columns \
                 WHERE owner = '{schema}' AND table_name = '{table}'"
         res = self.execute_query('ora', query)
         columns = [[res[i][0], res[i][1]] for i in range(len(res))]
-        print(columns)
 
         window = tk.Toplevel(self)
         ttk.Label(window, text=f'Defina como filtrar os dados\nColunas da tabela {schema}.{table}:').pack(padx=10, pady=10)
         
-        scrollBar = ttk.Scrollbar(window, orient='vertical')
-        scrollBar.pack(side='right')
-        canvas = tk.Canvas(window, width=400, height=300)
+        outerScrollFrame = tk.Frame(window)
+        outerScrollFrame.pack(fill='x', expand=True)
+        scrollBar = ttk.Scrollbar(outerScrollFrame, orient='vertical')
+        scrollBar.pack(side='right', fill='y')
+        canvas = tk.Canvas(outerScrollFrame)
         canvas.pack(fill='x', expand=True)
         scrollBar.configure(command=canvas.yview)
         canvas.configure(yscrollcommand=scrollBar.set)
 
-        scrollFrame = tk.Frame(canvas, bg='white')
-        scrollFrame.pack(fill='both', expand=True)
-        scrollFrame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
-        frame = canvas.create_window((0, 0), window=scrollFrame, anchor='nw')
+        innerScrollFrame = tk.Frame(canvas, bg='white')
+        innerScrollFrame.pack(fill='both', expand=True)
+        innerScrollFrame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        frame = canvas.create_window((0, 0), window=innerScrollFrame, anchor='nw')
 
         operators = {}
         widgets = {}
 
         for i, column in enumerate(columns):
             widgets[column[0]] = {}
-            ttk.Label(scrollFrame, text=column[0]).grid(row=i, column=0)
+            ttk.Label(innerScrollFrame, text=column[0], background='white').grid(row=i, column=0, padx=5)
             if column[1] in ('NUMBER', 'INTEGER', 'LONG', 'FLOAT', 'DATE', 'TIMESTAMP', 'RAW'):
                 operators[column[0]] = tk.StringVar()
-                widgets[column[0]]['operator'] = ttk.Combobox(scrollFrame, textvariable=operators[column[0]], values=('None', '=', '!=', '>', '<', '>=', '<=', 'BETWEEN'))
+                widgets[column[0]]['operator'] = ttk.Combobox(innerScrollFrame, textvariable=operators[column[0]], state='readonly', values=('None', '=', '!=', '>', '<', '>=', '<=', 'BETWEEN'), style='White.TCombobox')
                 widgets[column[0]]['operator'].current(0)
                 widgets[column[0]]['operator'].grid(row=i, column=1)
             elif column[1] in ('VARCHAR', 'VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'):
                 operators[column[0]] = tk.StringVar()
-                widgets[column[0]]['operator'] = ttk.Combobox(scrollFrame, textvariable=operators[column[0]], values=('None', '=', '!=', 'LIKE', 'NOT LIKE'))
+                widgets[column[0]]['operator'] = ttk.Combobox(innerScrollFrame, textvariable=operators[column[0]], state='readonly', values=('None', '=', '!=', 'LIKE', 'NOT LIKE'), style='White.TCombobox')
                 widgets[column[0]]['operator'].current(0)
                 widgets[column[0]]['operator'].grid(row=i, column=1)
-            widgets[column[0]]['condition'] = ttk.Entry(scrollFrame, width=20, state='disabled')
+            widgets[column[0]]['condition'] = ttk.Entry(innerScrollFrame, width=20, state='disabled')
             widgets[column[0]]['condition'].grid(row=i, column=2)
             widgets[column[0]]['operator'].bind('<<ComboboxSelected>>', lambda event, c = column[0]: self.check_variable_event(operators[c], widgets[c]['condition'], event))
-        ttk.Button(window, text='Testar filtro', command=lambda: self.test_custom_filter(schema, table, columns, result_display)).pack(padx=20, pady=10)
+        ttk.Button(window, text='Testar filtro', command=lambda: self.test_custom_filter(schema, table, columns, operators, widgets, result_display)).pack(padx=20, pady=10)
         result_display = ScrolledText(window, wrap=tk.WORD, state='disabled')
         result_display.config(height=10, width=30)
-        result_display.pack(padx=10, pady=10)
-        ttk.Button(window, text='Voltar', command=window.destroy).pack(padx=20, pady=10)
+        result_display.pack(pady=10, fill='x', expand=True)
+        ttk.Button(window, text='Salvar', command=lambda:[self.save_configuration(schema, table, columns, operators, widgets), window.destroy()]).pack(padx=20, pady=10)
+        self.load_configuration(schema, table, columns, widgets)
+        window.update()
 
     def check_variable_event(self, var, entry, event):
         if var.get() != 'None':
             entry.config(state = 'normal')
         else:
+            entry.delete(0, tk.END)
             entry.config(state = 'disabled')
 
+    def load_configuration(self, schema, table, columns, widgets):
+        try:
+            if self.table_data[f'{schema}.{table}']['config'].get() == 'custom':
+                for column in columns:
+                    if len(self.table_data[f'{schema}.{table}']['filter'].keys()) > 0:
+                        operator = self.table_data[f'{schema}.{table}']['filter'][column[0]]['operator']
+                        if operator != 'None':
+                            value = self.table_data[f'{schema}.{table}']['filter'][column[0]]['value']
+                            widgets[column[0]]['operator'].current(operator[0])
+                            widgets[column[0]]['condition'].config(state='normal')
+                            widgets[column[0]]['condition'].insert(0, value)
+        except Exception as e:
+            print(e)
+            return
+
+    def save_configuration(self, schema, table, columns, operators, widgets):
+        for column in columns:
+            if operators[column[0]].get() != 'None':
+                value = widgets[column[0]]['condition'].get()
+                # Proteção contra injeção de sql
+                if len(value.split()) == 1:
+                    self.table_data[f'{schema}.{table}']['filter'][column[0]] = {}
+                    self.table_data[f'{schema}.{table}']['filter'][column[0]]['operator'] = [widgets[column[0]]['operator'].current(), operators[column[0]].get()]
+                    self.table_data[f'{schema}.{table}']['filter'][column[0]]['value'] = value
+                else:
+                    self.message_window('Por favor, não utilize espaços nas entradas de filtragem!')
+                    return
+            else:
+                self.table_data[f'{schema}.{table}']['filter'][column[0]] = {}
+                self.table_data[f'{schema}.{table}']['filter'][column[0]]['operator'] = 'None'
+        self.message_window('Salvo!')
+
     # Testa integridade da filtragem
-    def test_custom_filter(self, schema, table, column_data, operators, widgets, display):
+    def test_custom_filter(self, schema, table, columns, operators, widgets, display):
         filter = ''
-        columns_list = [column_data[i][0] for i in range(len(column_data))]
-        for column in columns_list:
-            if operators[column].get() != 'None':
-                value = widgets[column]['condition'].get()
+        for column in columns:
+            if operators[column[0]].get() != 'None':
+                value = widgets[column[0]]['condition'].get()
                 # Proteção contra injeção de sql
                 if len(value.split()) == 1:
                     if filter == '':
-                        filter = f"WHERE {column} {operators[column].get()} {value}"
+                        filter = f"WHERE {column[0]} {operators[column[0]].get()} {value}"
                     else:
-                        filter += f"\nAND {column} {operators[column].get()} {value}"
+                        filter += f"\nAND {column[0]} {operators[column[0]].get()} {value}"
                 else:
                     self.message_window('Por favor, não utilize espaços nas entradas de filtragem!')
                     return
@@ -1355,14 +1397,15 @@ class Oracle2PostgresDirect(tk.Toplevel):
         try:
             res = self.execute_query('ora', query)
             display.config(state='normal')
-            for data in res:
-                display.insert(tk.END, data)
+            display.delete('1.0', tk.END)
+            if res:
+                for data in res:
+                    display.insert(tk.END, str(data) + '\n')
             display.config(state='disabled')
-            self.table_data[f'{schema}.{table}']['filter'] = filter
-            print(filter)
             return
-        except:
+        except Exception as e:
             self.message_window('Execução da query falhou, verifique se os valores de filtragem estão bem definidos!')
+            print(e)
             return
 
     # Auto explicatório
