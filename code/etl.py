@@ -39,7 +39,7 @@ class ETL_session_UI(tk.Toplevel):
     S = threading.Semaphore()
     _state = 'idle'
 
-    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup):
+    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup, table_data):
         try:
             super().__init__(master)
             self.protocol('WM_DELETE_WINDOW', self.stop_etl)
@@ -68,6 +68,7 @@ class ETL_session_UI(tk.Toplevel):
             self.pg_jar = pg_jar
             self.master = master
             self.setup = setup
+            self.table_data = table_data
             # Conexões genéricas para execução de DML/DDL (PySpark apenas executa queries para coleta de dados)
             # (auto-commit ON, usar a função commit() ou fetch() em operações DML/DDL causará erro,
             #  operações DML/DDL executadas seram aplicadas na base de dados automaticamente!)
@@ -133,8 +134,8 @@ class ETL_session_UI(tk.Toplevel):
         self.S.release()
 
 class Oracle2PostgresETL(ETL_session_UI):
-    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup):
-        super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup)
+    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup, table_data):
+        super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup, table_data)
 
     def setup_processing(self):
         cur = self.pg_conn.cursor()
@@ -272,12 +273,34 @@ class Oracle2PostgresETL(ETL_session_UI):
         table_name = table[1]
         self.write2display(f'Coletando {table_schema}.{table_name}...')
         table_data = {}
-        # Pega informações sobre as colunas da tabela
         if self.ora_user.lower() == 'sys':
             user = 'sys as sysdba'
         else:
             user = self.ora_user.lower()
+        # Coleta informações sobre as colunas da tabela
         data = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=user, password=self.ora_password, url=self.ora_url, dbtable=f'{table_schema.lower()}.{table_name.lower()}').load()
+        if self.table_data[f'{table_schema}.{table_name}']['config'].get() == 'custom':
+            for key, value in self.table_data[f'{table_schema}.{table_name}']['filter'].items():
+                column = key
+                operator = value['operator']
+                if operator == 'None':
+                    continue
+                data_value = value['value']
+                # Filtra os dados de acordo com as configurações definidas
+                if operator[1] == 'BETWEEN':
+                    data_value = data_value.split('-')
+                    data = data.where(col(column).between(data_value[0], data_value[1]))
+                else:
+                    data = data.filter(f"{column} {operator[1]} {data_value}")
+        elif self.table_data[f'{table_schema}.{table_name}']['config'].get() == 'none':
+            query = f"select cols.column_name from all_tab_columns cols join all_cons_columns cc \
+                    on cols.table_name = cc.table_name AND cols.column_name = cc.column_name \
+                    join all_constraints cons on cc.constraint_name = cons.constraint_name \
+                    where cons.constraint_type = 'P' and cols.owner = '{table_schema}' and cols.table_name = '{table_name}'"
+            pk = self.execute_spark_query('ora', query)
+            pk = pk[0]['COLUMN_NAME']
+            # Filtra tudo deixando apenas a informação onde a chave primária é -1 (não existe)
+            data = data.filter(f"{pk} = -1")
         # Muda os nomes das tabelas para letras minusculas
         data = data.select([col(x).alias(x.lower()) for x in data.columns])
         table_data['data'] = data
@@ -355,14 +378,17 @@ class Oracle2PostgresETL(ETL_session_UI):
             cur.execute(f"ALTER TABLE {self.pg_schema}.{table_name} ADD PRIMARY KEY {pk_columns}")
             if df['auto']:
                 last_val = df['data'].agg({df['auto']: 'max'}).collect()[0]
+                # Checa se sequencia já existe
                 cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class cls \
                             ON seq.seqrelid = cls.oid JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace \
                             WHERE cls.relname = '{table_name}_{df['auto'].lower()}_seq' AND nsp.nspname = '{self.pg_schema}'")
                 res = cur.fetchall()
-                if len(res) == 0:
-                    cur.execute(f'''CREATE SEQUENCE {self.pg_schema}.{table_name}_{df['auto'].lower()}_seq START WITH {int(last_val[f"max({df['auto']})"]) + 1}''')
-                else:
-                    cur.execute(f'''ALTER SEQUENCE {self.pg_schema}.{table_name}_{df['auto'].lower()}_seq RESTART WITH {int(last_val[f"max({df['auto']})"]) + 1}''')
+                # Checa se existe algum dado na tabela
+                if last_val[f"max({df['auto']})"]:
+                    if len(res) == 0:
+                        cur.execute(f'''CREATE SEQUENCE {self.pg_schema}.{table_name}_{df['auto'].lower()}_seq START WITH {int(last_val[f"max({df['auto']})"]) + 1}''')
+                    else:
+                        cur.execute(f'''ALTER SEQUENCE {self.pg_schema}.{table_name}_{df['auto'].lower()}_seq RESTART WITH {int(last_val[f"max({df['auto']})"]) + 1}''')
                 cur.execute(f'''ALTER TABLE {self.pg_schema}.{table_name} ALTER COLUMN "{df['auto'].lower()}" SET DEFAULT nextval('{self.pg_schema}.{table_name}_{df['auto'].lower()}_seq')''')
                 cur.execute(f"ALTER SEQUENCE {self.pg_schema}.{table_name}_{df['auto'].lower()}_seq OWNER TO {self.pg_user}")
         except Exception as e:
@@ -435,7 +461,7 @@ class Oracle2PostgresETL(ETL_session_UI):
         self.write2display(f'Extraindo {type} {name}')
         if type == 'SEQUENCE':
             # Sequencias não precisam de tradução, então já a adiciona imediatamente
-            cur = self.oracle_conn.cursor()
+            cur = self.ora_conn.cursor()
             cur.execute(f"select last_number, increment_by from all_sequences where sequence_owner = '{owner}' and sequence_name = '{name}'")
             res = cur.fetchall()
             if len(res) > 0:
@@ -1124,7 +1150,7 @@ class Postgres2OracleETL(ETL_session_UI):
     # Carrega dados de uma tabela para a base de dados alvo
     def load_table(self, df, tbl):
         # Estabelece conexão genérica
-        cur = self.oracle_conn.cursor()
+        cur = self.ora_conn.cursor()
         if tbl in self.ora_tables:
             self.write2display(f"Tabela {tbl} já existe no schema {self.user}, substituindo...")
             cur.execute(f"DROP TABLE {self.user}.{tbl} CASCADE")

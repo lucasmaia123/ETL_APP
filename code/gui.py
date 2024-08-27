@@ -49,7 +49,6 @@ class etl_UI(tk.Frame):
         s = ttk.Style(master)
         s.configure('White.TRadiobutton', background='white', foreground='black')
         s.configure('White.TCheckbutton', background='white', foreground='black')
-        s.configure('White.TCombobox', background='white', selectbackground='white')
         self.master.protocol('WM_DELETE_WINDOW', self.end_process)
         self.draw_start_menu()
 
@@ -1253,12 +1252,13 @@ class Oracle2PostgresDirect(tk.Toplevel):
         # ???
         frame = canvas.create_window((0, 0), window=innerScrollFrame, anchor='nw')
 
+        max_label_size = 0
+
         for i, table in enumerate(tables):
             table_name = deepcopy(table[1])
             schema = deepcopy(table[0])
             self.table_data[f'{schema}.{table_name}'] = {}
             ttk.Label(innerScrollFrame, text=f'{schema}.{table_name}', background='white').grid(row=i, column=0, padx=5)
-
             self.table_data[f'{schema}.{table_name}']['config'] = tk.StringVar()
             self.table_data[f'{schema}.{table_name}']['filter'] = {}
             rbref = ttk.Radiobutton(innerScrollFrame, text='Todos os dados', variable=self.table_data[f'{schema}.{table_name}']['config'], value='all', style='White.TRadiobutton')
@@ -1266,27 +1266,18 @@ class Oracle2PostgresDirect(tk.Toplevel):
             ttk.Radiobutton(innerScrollFrame, text='Apenas esqueleto', variable=self.table_data[f'{schema}.{table_name}']['config'], value='none', style='White.TRadiobutton').grid(row=i, column=2, padx=5)
             ttk.Radiobutton(innerScrollFrame, text='Customizado', variable=self.table_data[f'{schema}.{table_name}']['config'], value='custom', command=lambda table_name=table_name, schema=schema:self.customize_column_data(schema, table_name), style='White.TRadiobutton').grid(row=i, column=3, padx=5)
             rbref.invoke()
+            cur_label_size = len(f'{schema}.{table_name}')
+            if cur_label_size > max_label_size:
+                max_label_size = cur_label_size
 
         ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)
-        ttk.Button(window, text='Prosseguir', command=lambda:self.collect_table_data(tables, sources)).pack(side='right', padx=20, pady=20)
+        ttk.Button(window, text='Prosseguir', command=lambda:[self.list_objects(tables, sources), window.destroy()]).pack(side='right', padx=20, pady=20)
+        
+        # Redimensionamento manual da janela pois o organizador automático não está funcionando
+        width = 400 + max_label_size * 10
+        window.geometry(f'{width}x400')
         window.update()
-
-    def collect_table_data(self, tables, sources):
-        pass
-        '''
-        window = tk.Toplevel(self)
-        ttk.Label(window, text='Query das tabelas sendo migradas:').pack(padx=10, pady=10)
-        for table in tables:
-            ttk.Label(window, text=f'{table[0]}.{table[1]}')
-            if self.table_config != 'none':
-                query = self.table_query[f'{table[0]}.{table[1]}']
-                res = self.execute_query('ora', query)
-                ttk.Label(window, text=query).pack()
-                ttk.Label(window, text=res).pack()
-            else:
-                ttk.Label(window, text='Null').pack()
-        ttk.Button(window, text='Ok', command=window.destroy).pack(padx=10, pady=10)
-        '''
+        canvas.update()
 
     # Customiza quais dados de colunas especificas devem ser migrados
     def customize_column_data(self, schema, table):
@@ -1315,28 +1306,35 @@ class Oracle2PostgresDirect(tk.Toplevel):
         operators = {}
         widgets = {}
 
+        max_label_size = 0
+
         for i, column in enumerate(columns):
             widgets[column[0]] = {}
-            ttk.Label(innerScrollFrame, text=column[0], background='white').grid(row=i, column=0, padx=5)
+            ttk.Label(innerScrollFrame, text=column[0], background='white').grid(row=i, column=0)
             if column[1] in ('NUMBER', 'INTEGER', 'LONG', 'FLOAT', 'DATE', 'TIMESTAMP', 'RAW'):
                 operators[column[0]] = tk.StringVar()
-                widgets[column[0]]['operator'] = ttk.Combobox(innerScrollFrame, textvariable=operators[column[0]], state='readonly', values=('None', '=', '!=', '>', '<', '>=', '<=', 'BETWEEN'), style='White.TCombobox')
+                widgets[column[0]]['operator'] = ttk.Combobox(innerScrollFrame, textvariable=operators[column[0]], state='readonly', values=('None', '=', '!=', '>', '<', '>=', '<=', 'BETWEEN'))
                 widgets[column[0]]['operator'].current(0)
                 widgets[column[0]]['operator'].grid(row=i, column=1)
             elif column[1] in ('VARCHAR', 'VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'):
                 operators[column[0]] = tk.StringVar()
-                widgets[column[0]]['operator'] = ttk.Combobox(innerScrollFrame, textvariable=operators[column[0]], state='readonly', values=('None', '=', '!=', 'LIKE', 'NOT LIKE'), style='White.TCombobox')
+                widgets[column[0]]['operator'] = ttk.Combobox(innerScrollFrame, textvariable=operators[column[0]], state='readonly', values=('None', '=', '!=', 'LIKE', 'NOT LIKE'))
                 widgets[column[0]]['operator'].current(0)
                 widgets[column[0]]['operator'].grid(row=i, column=1)
-            widgets[column[0]]['condition'] = ttk.Entry(innerScrollFrame, width=20, state='disabled')
+            widgets[column[0]]['condition'] = ttk.Entry(innerScrollFrame, width=20, state='disabled', tooltip="Caso deseje filtar com BETWEEN, insira os valores de filtragem no formato 'limiteMenor-limiteMaior' separados com - sem espaço!")
             widgets[column[0]]['condition'].grid(row=i, column=2)
             widgets[column[0]]['operator'].bind('<<ComboboxSelected>>', lambda event, c = column[0]: self.check_variable_event(operators[c], widgets[c]['condition'], event))
+            if len(column[0]) > max_label_size:
+                max_label_size = len(column[0])
         ttk.Button(window, text='Testar filtro', command=lambda: self.test_custom_filter(schema, table, columns, operators, widgets, result_display)).pack(padx=20, pady=10)
         result_display = ScrolledText(window, wrap=tk.WORD, state='disabled')
         result_display.config(height=10, width=30)
         result_display.pack(pady=10, fill='x', expand=True)
         ttk.Button(window, text='Salvar', command=lambda:[self.save_configuration(schema, table, columns, operators, widgets), window.destroy()]).pack(padx=20, pady=10)
         self.load_configuration(schema, table, columns, widgets)
+        width = 400 + max_label_size * 10
+        window.geometry(f'{width}x650')
+        canvas.update()
         window.update()
 
     def check_variable_event(self, var, entry, event):
@@ -1376,7 +1374,6 @@ class Oracle2PostgresDirect(tk.Toplevel):
             else:
                 self.table_data[f'{schema}.{table}']['filter'][column[0]] = {}
                 self.table_data[f'{schema}.{table}']['filter'][column[0]]['operator'] = 'None'
-        self.message_window('Salvo!')
 
     # Testa integridade da filtragem
     def test_custom_filter(self, schema, table, columns, operators, widgets, display):
@@ -1386,6 +1383,12 @@ class Oracle2PostgresDirect(tk.Toplevel):
                 value = widgets[column[0]]['condition'].get()
                 # Proteção contra injeção de sql
                 if len(value.split()) == 1:
+                    if operators[column[0]].get() == 'BETWEEN':
+                        if '-' not in value:
+                            self.message_window('Formato incorreto!')
+                            return
+                        limits = value.split('-')
+                        value = f'{limits[0]} AND {limits[1]}'
                     if filter == '':
                         filter = f"WHERE {column[0]} {operators[column[0]].get()} {value}"
                     else:
@@ -1407,37 +1410,6 @@ class Oracle2PostgresDirect(tk.Toplevel):
             self.message_window('Execução da query falhou, verifique se os valores de filtragem estão bem definidos!')
             print(e)
             return
-
-    # Auto explicatório
-    def list_columns(self, table, schema):
-
-        query = f"SELECT cols.column_name, cols.data_type, \
-                CASE cons.constraint_type \
-                    WHEN 'P' THEN 'Primary key' \
-                    WHEN 'R' THEN 'Foreign key' \
-                    ELSE '' END AS constraint_type \
-                FROM all_tab_columns cols \
-                JOIN all_cons_columns cc ON cols.column_name = cc.column_name AND cols.table_name = cc.table_name \
-                JOIN all_constraints cons ON cons.constraint_name = cc.constraint_name \
-                WHERE cols.owner = '{schema}' AND cols.table_name = '{table}'"
-        res = self.execute_query('ora', query)
-        res = [[res[i][0], res[i][1], res[i][2]] for i in range(len(res))]
-
-        window = tk.Toplevel(self)
-        window.title(f'Colunas de {schema}.{table}')
-        box_frame = ttk.Frame(window)
-        box_frame.pack()
-        scrollBar = tk.Scrollbar(box_frame, orient='vertical')
-        scrollBar.pack(side='right', fill='y')
-        textBox = tk.Text(box_frame, yscrollcommand=scrollBar.set, state='normal', height=10)
-        textBox.pack(pady=10)
-        textBox.insert(tk.END, 'COLUNA    TIPO    CONSTRAINT')
-        textBox.insert(tk.END, '-' * 30)
-        for col in res:
-            textBox.insert(tk.END, f'{col[0]}    {col[1]}    {col[2]}')
-        scrollBar.config(command=textBox.yview)
-        textBox.config(state='disabled')
-        ttk.Button(window, text='Fechar', command=window.destroy).pack(padx=10, pady=10)
 
     # Lista tudo que será inserido e tudo que será deletado no banco de dados alvo
     def list_objects(self, tables, sources):
@@ -1468,7 +1440,7 @@ class Oracle2PostgresDirect(tk.Toplevel):
             if self.setup['delete_user']:
                 dropped_info.insert(tk.END, f"Deleta usuário {self.setup['create_user']}\n")
             for object in self.deleted_objects:
-                dropped_info.insert(tk.END, f'Substitui/remove {object[2]} {object[0]}.{object[1]}\n')
+                dropped_info.insert(tk.END, f'Substitui {object[2]} {object[0]}.{object[1]}\n')
         ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=20)
         ttk.Button(window, text='Começar a migrar!', command=lambda:[self.begin_etl_session(tables, sources), window.destroy()]).pack(side='right', padx=20, pady=20)
 
@@ -1490,7 +1462,7 @@ class Oracle2PostgresDirect(tk.Toplevel):
                     pass
                 else:
                     return
-        etl_session = Oracle2PostgresETL(self.master, pg_conf, ora_conf, self.user, tables, sources, self.etl, self.pg_jar, self.ora_jar, self.pg_schema, self.setup, self.mode)
+        etl_session = Oracle2PostgresETL(self.master, pg_conf, ora_conf, self.user, tables, sources, self.etl, self.pg_jar, self.ora_jar, self.pg_schema, self.setup, self.table_data)
         self.write2log(f"migrando tabelas {tables} e sources {sources} do Oracle schema '{self.user}' para Postgres database {self.pg_database} schema '{self.pg_schema}'!")
         self.active_sessions.append(etl_session)
         # Começa a migração
