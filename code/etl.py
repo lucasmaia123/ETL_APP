@@ -2,6 +2,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from multiprocessing import Queue
 from pyspark.sql.functions import *
+import pandas as pd
 import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
@@ -69,16 +70,6 @@ class ETL_session_UI(tk.Toplevel):
             self.master = master
             self.setup = setup
             self.table_data = table_data
-            # Conexões genéricas para execução de DML/DDL (PySpark apenas executa queries para coleta de dados)
-            # (auto-commit ON, usar a função commit() ou fetch() em operações DML/DDL causará erro,
-            #  operações DML/DDL executadas seram aplicadas na base de dados automaticamente!)
-            self.pg_conn = psycopg2.connect(dbname=self.pg_database, user=self.pg_user, password=self.pg_password, host=self.pg_host, port=self.pg_port)
-            self.pg_conn.autocommit = True
-            if self.ora_user.lower() == 'sys':
-                self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=oracledb.AUTH_MODE_SYSDBA)
-            else:
-                self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=oracledb.AUTH_MODE_DEFAULT)
-            self.ora_conn.autocommit = True
         except Exception as e:
             print("Erro de conexão: " + str(e))
 
@@ -134,10 +125,24 @@ class ETL_session_UI(tk.Toplevel):
         self.S.release()
 
 class Oracle2PostgresETL(ETL_session_UI):
-    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup, table_data):
+    def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup, table_data, mode):
         super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup, table_data)
+        self.mode = mode
+        if mode == 'script':
+            self.script_body = []
+        # Conexões genéricas para execução de DML/DDL (PySpark apenas executa queries para coleta de dados)
+        # (auto-commit ON, usar a função commit() ou fetch() em operações DML/DDL causará erro,
+        #  operações DML/DDL executadas seram aplicadas na base de dados automaticamente!)
+        if mode == 'direct':
+            self.pg_conn = psycopg2.connect(dbname=self.pg_database, user=self.pg_user, password=self.pg_password, host=self.pg_host, port=self.pg_port)
+            self.pg_conn.autocommit = True
+        if self.ora_user.lower() == 'sys':
+            self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=oracledb.AUTH_MODE_SYSDBA)
+        else:
+            self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=oracledb.AUTH_MODE_DEFAULT)
+        self.ora_conn.autocommit = True
 
-    def setup_processing(self):
+    def setup_processing_direct(self):
         cur = self.pg_conn.cursor()
         for db in self.setup['delete_database']:
             try:
@@ -184,6 +189,39 @@ class Oracle2PostgresETL(ETL_session_UI):
             cur.execute(f'ALTER SCHEMA {owner[0]} OWNER TO {owner[1]}')
         cur.close()
 
+    def setup_processing_script(self):
+        if len(self.setup.values()) > 0:
+            self.script_body.append('-- Preparação pré migração')
+        for db in self.setup['delete_database']:
+            self.script_body.append(f'DROP DATABASE {db} WITH (FORCE)')
+        for db in self.setup['create_database']:
+            self.script_body.append(f'CREATE DATABASE {db}')
+        if self.setup['delete_user']:
+            self.script_body.append(f"DROP OWNED BY {self.setup['delete_user']} CASCADE")
+            self.script_body.append(f"DROP USER {self.setup['delete_user']}")
+        if self.setup['create_superuser']:
+            user = self.setup['create_superuser'][0]
+            password = self.setup['create_superuser'][1]
+            self.script_body.append(f'CREATE SUPERUSER {user} WITH PASSWORD {password}')
+        if self.setup['create_user']:
+            user = self.setup['create_user'][0]
+            password = self.setup['create_user'][1]
+            self.script_body.append(f'CREATE USER {user} WITH PASSWORD {password}')
+        if self.setup['owner_database']:
+            owner = self.setup['owner_database']
+            self.script_body.append(f'GRANT CONNECT ON DATABASE {owner[0]} TO {owner[1]}')
+            self.script_body.append(f'ALTER DATABASE {owner[0]} OWNER TO {owner[1]}')
+        if self.setup['connect']:
+            self.script_body.append(f"CONNECT -U {self.setup['connect']['user']} -p {self.setup['connect']['password']} -d {self.setup['connect']['database']}")
+        if self.setup['create_schema']:
+            self.script_body.append(f"DROP SCHEMA IF EXISTS {self.setup['create_schema']} CASCADE")
+            self.script_body.append(f"CREATE SCHEMA {self.setup['create_schema']}")
+        if self.setup['owner_schema']:
+            owner = self.setup['owner_schema']
+            self.script_body.append(f'GRANT USAGE ON SCHEMA {owner[0]} TO {owner[1]}')
+            self.script_body.append(f'ALTER DEFAULT PRIVILEGES IN SCHEMA {owner[0]} GRANT ALL PRIVILEGES ON TABLES TO {owner[1]}')
+            self.script_body.append(f'ALTER SCHEMA {owner[0]} TO {owner[1]}')
+
     # Começa a extrair os dados das tabelas do cluster cujo foi estabelecida a conexão
     @threaded
     def start_etl(self):
@@ -193,24 +231,25 @@ class Oracle2PostgresETL(ETL_session_UI):
             self.draw_app_window()
             while not self.done_drawing:
                 pass
-            query = "SELECT nspname FROM pg_catalog.pg_namespace"
-            pg_schemas = self.execute_spark_query('pg', query)
-            pg_schemas = [pg_schemas[i]['nspname'] for i in range(len(pg_schemas))]
-            if self.pg_schema not in pg_schemas:
-                cur = self.pg_conn.cursor()
-                cur.execute(f"CREATE SCHEMA {self.pg_schema}")
-                cur.close()
-                self.write2display(f'Schema {self.pg_schema} criado no Postgres!')
-            query = f'''SELECT table_name FROM information_schema.tables WHERE table_schema = '{self.pg_schema}' '''
-            self.pg_tables = self.execute_spark_query('pg', query)
-            self.pg_tables = [self.pg_tables[i]['table_name'] for i in range(len(self.pg_tables))]
-            query = f'''SELECT proname FROM pg_proc p join pg_namespace n on n.oid = p.pronamespace where nspname = '{self.pg_schema}' '''
-            self.pg_source = self.execute_spark_query('pg', query)
-            self.pg_source = [self.pg_source[i]['proname'] for i in range(len(self.pg_source))]
+            if self.mode == 'direct':
+                query = "SELECT nspname FROM pg_catalog.pg_namespace"
+                pg_schemas = self.execute_spark_query('pg', query)
+                pg_schemas = [pg_schemas[i]['nspname'] for i in range(len(pg_schemas))]
+                if self.pg_schema not in pg_schemas:
+                    cur = self.pg_conn.cursor()
+                    cur.execute(f"CREATE SCHEMA {self.pg_schema}")
+                    cur.close()
+                    self.write2display(f'Schema {self.pg_schema} criado no Postgres!')
+                query = f'''SELECT table_name FROM information_schema.tables WHERE table_schema = '{self.pg_schema}' '''
+                self.pg_tables = self.execute_spark_query('pg', query)
+                self.pg_tables = [self.pg_tables[i]['table_name'] for i in range(len(self.pg_tables))]
+                query = f'''SELECT proname FROM pg_proc p join pg_namespace n on n.oid = p.pronamespace where nspname = '{self.pg_schema}' '''
+                self.pg_source = self.execute_spark_query('pg', query)
+                self.pg_source = [self.pg_source[i]['proname'] for i in range(len(self.pg_source))]
             # Executa extração de cada tabela/source em threads assincronas
             # O número no método define quantos objetos serão extraídos simultaneamente
             # Aumentar este valor fará o processo mais rápido mas poderá causar instabilidades
-            with ThreadPoolExecutor(1) as executor:
+            with ThreadPoolExecutor(5) as executor:
                 failures = []
                 for table in self.tables:
                     self.table_queue.put_nowait(table)
@@ -262,6 +301,9 @@ class Oracle2PostgresETL(ETL_session_UI):
             self.information_label.config(text='Migração concluída!')
             self.button.config(text='Ok')
             self._state = 'success'
+            if mode == 'script':
+                for line in self.script_body:
+                    print(line)
         except Exception as e:
             self.write2display('Migração falhou!')
             self._state = 'failed'
@@ -287,11 +329,11 @@ class Oracle2PostgresETL(ETL_session_UI):
                     continue
                 data_value = value['value']
                 # Filtra os dados de acordo com as configurações definidas
-                if operator[1] == 'BETWEEN':
+                if operator == 'BETWEEN':
                     data_value = data_value.split('-')
                     data = data.where(col(column).between(data_value[0], data_value[1]))
                 else:
-                    data = data.filter(f"{column} {operator[1]} {data_value}")
+                    data = data.filter(f"{column} {operator} {data_value}")
         elif self.table_data[f'{table_schema}.{table_name}']['config'].get() == 'none':
             query = f"select cols.column_name from all_tab_columns cols join all_cons_columns cc \
                     on cols.table_name = cc.table_name AND cols.column_name = cc.column_name \
@@ -357,7 +399,10 @@ class Oracle2PostgresETL(ETL_session_UI):
                     self.write2display(f"Tabela {table_name} depende da tabela {value['ref_table']}, adiando extração...")
                     return ['waiting', table, value['ref_table']]
         self.write2display(f"Extração concluída na tabela {table_schema}.{table_name}")
-        res = self.load_table(table_data, table)
+        if self.mode == 'direct':
+            res = self.load_table(table_data, table)
+        elif self.mode == 'script':
+            res = self.create_script(table_data, table)
         return [res, table, None]
 
     # Carrega dados de uma tabela para a base de dados alvo
@@ -444,6 +489,25 @@ class Oracle2PostgresETL(ETL_session_UI):
             print('Error ' + str(e))
             return 'failed'
 
+    def load_table_script(self, df, tbl):
+        schema = tbl[0].lower()
+        table = tbl[1].lower()
+        pandas_df = df.toPandas()
+        table_skeleton = pd.io.sql.get_schema(pandas_df.reset_index(), f'{schema}.{table}')
+        self.script_body.append(table_skeleton)
+        for index, row in pandas_df.iterrows():
+            self.script_body.append(f"INSERT INTO {schema}.{table} ({', '.join(pandas_df.columns)}) VALUES {tuple(row.values)}")
+
+    # Adapta o texto do script para o contexto do SGBD para o qual sera migrado
+    def transform_sql_script(self, data):
+        tokens = []
+        for line in data:
+            for token in line.split():
+                tokens.append(token)
+        for i, token in enumerate(tokens):
+            if token == 'TEXT':
+                tokens[i] = 'VARCHAR'
+
     def list2str(self, lista):
         res = '('
         for value in lista:
@@ -468,18 +532,24 @@ class Oracle2PostgresETL(ETL_session_UI):
                 last_val = res[0][0] + 1
                 increment = res[0][1]
                 cur.close()
-                cur = self.pg_conn.cursor()
-                cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class cls \
-                    ON seq.seqrelid = cls.oid JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace \
-                    WHERE cls.relname = '{name.lower()}' AND nsp.nspname = '{self.pg_schema}'")
-                res = cur.fetchall()
-                if len(res):
-                    cur.execute(f"DROP SEQUENCE {self.pg_schema}.{name.lower()} CASCADE")
-                cur.execute(f"CREATE SEQUENCE {self.pg_schema}.{name.lower()} INCREMENT BY {increment} START WITH {last_val}")
-                self.write2display(f'Sequence {self.pg_schema}.{name.lower()} inserido no Postgres!')
-                return ['done', data, None]
+                if self.mode == 'direct':
+                    cur = self.pg_conn.cursor()
+                    cur.execute(f"SELECT cls.relname FROM pg_sequence seq JOIN pg_class cls \
+                        ON seq.seqrelid = cls.oid JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace \
+                        WHERE cls.relname = '{name.lower()}' AND nsp.nspname = '{self.pg_schema}'")
+                    res = cur.fetchall()
+                    if len(res):
+                        cur.execute(f"DROP SEQUENCE {self.pg_schema}.{name.lower()} CASCADE")
+                    cur.execute(f"CREATE SEQUENCE {self.pg_schema}.{name.lower()} INCREMENT BY {increment} START WITH {last_val}")
+                    self.write2display(f'Sequence {self.pg_schema}.{name.lower()} inserido no Postgres!')
+                    return ['done', data, None]
+                elif self.mode == 'script':
+                    self.script_body.append(f'DROP SEQUENCE {self.pg_schema}.{name.lower()} CASCADE')
+                    self.script_body.append(f'CREATE SEQUENCE {self.pg_schema}.{name.lower()} INCREMENT BY {increment} START WITH {last_val}')
+                    return ['done', data, None]
             else:
                 return ['failed', data, None]
+        # Coleta o corpo para definição do source
         if type == 'VIEW':
             query = f"SELECT text FROM all_views WHERE owner = '{owner}' AND view_name = '{name}'"
         else:
@@ -920,7 +990,6 @@ class Oracle2PostgresETL(ETL_session_UI):
                     if self.pg_schema != 'public':
                         tokens[i+1] = f'{self.pg_schema}.{tokens[i+1]}'
                 source_body += tokens[i] + ' '
-        cur = self.pg_conn.cursor()
         if factory_func:
             self.write2display(f"Função {source_name} detectada como factory, não é possível garantir o funcionamento da migração\nFunção {source_name} sera adicionada na pasta manual_migrations para migração manual!")
             make_txt_file(source_name, source_body, 'Função tipo factory')
@@ -929,20 +998,28 @@ class Oracle2PostgresETL(ETL_session_UI):
             self.write2display(f"Função de sistema não suportada detectada em {source_name}\n{source_name} será adicionado em manual_migrations para migração manual!")
             make_txt_file(source_name, source_body, f'Função {unsupported} não suportada pelo aplicativo')
             return 'failed'
-        if source_name in self.pg_source:
-            self.write2display(f'Substituindo {type} {source_name} no Postgresql...')
-            cur.execute(f"DROP {type} {source_name} CASCADE;")
-        else:
-            self.write2display(f'Carregando {type} {source_name} no Postgresql...')
-        try:
-            cur.execute(source_body)
-            cur.close()
-            self.write2display(f"{type} {source_name} carregado no Postgresql!")
-            return self.test_source(data_aux, source_name, type)
-        except Exception as e:
-            self.write2display(f'Algo deu errado na tradução do {type} {source_name}! Adicionado para migração manual!')
-            make_txt_file(source_name, source_body, e)
-            print(f'Error: ' + str(e))
+        if self.mode == 'direct':
+            cur = self.pg_conn.cursor()
+            if source_name in self.pg_source:
+                self.write2display(f'Substituindo {type} {source_name} no Postgresql...')
+                cur.execute(f"DROP {type} {source_name} CASCADE")
+            else:
+                self.write2display(f'Carregando {type} {source_name} no Postgresql...')
+            try:
+                cur.execute(source_body)
+                cur.close()
+                self.write2display(f"{type} {source_name} carregado no Postgresql!")
+                return self.test_source(data_aux, source_name, type)
+            except Exception as e:
+                self.write2display(f'Algo deu errado na tradução do {type} {source_name}! Adicionado para migração manual!')
+                make_txt_file(source_name, source_body, e)
+                print(f'Error: ' + str(e))
+                return 'failed'
+        elif self.mode == 'script':
+            self.script_body.append(f'DROP {type} {source_name} CASCADE')
+            for line in source_body:
+                self.script_body.append(line)
+            return 'done'
 
     # Testa se a tradução do plsql ocorreu sem erros
     def test_source(self, data, name, type):

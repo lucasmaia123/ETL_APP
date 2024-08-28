@@ -275,3 +275,20 @@
 27/08/2024 12:35:52 Sessão 8740187430437: Base de dados retornada ao último estado estável
 27/08/2024 12:35:52 Sessão 8740187430437: Arquivo de backup não encontrado, prosseguindo...
 27/08/2024 12:35:52 Sessão 8740187430437: Terminada sessão de ETL 8740183520765
+28/08/2024 09:50:23 Sessão 8777045727681: Iniciando sessão 8777077864393 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/postgres
+28/08/2024 09:52:43 Sessão 8770158077393: Iniciando sessão 8770157946401 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/teste
+28/08/2024 09:53:06 Sessão 8770158077393: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE']] do Oracle schema 'LUCAS' para Postgres database teste schema 'public'!
+28/08/2024 09:53:08 Sessão 8770158077393: Migração falhou! Retornando base de dados para estado anterior...
+28/08/2024 09:53:08 Sessão 8770158077393: Base de dados retornada ao último estado estável
+28/08/2024 09:53:08 Sessão 8770158077393: Arquivo de backup não encontrado, prosseguindo...
+28/08/2024 09:53:08 Sessão 8770158077393: Terminada sessão de ETL 8770156842385
+28/08/2024 09:54:55 Sessão 8778634185497: Iniciando sessão 8778669960337 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/teste
+28/08/2024 09:55:16 Sessão 8778634185497: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE']] do Oracle schema 'LUCAS' para Postgres database teste schema 'public'!
+28/08/2024 09:55:27 Sessão 8778634185497: Migração concluída com sucesso!
+28/08/2024 09:55:27 Sessão 8778634185497: Arquivo de backup não encontrado, prosseguindo...
+28/08/2024 09:55:27 Sessão 8778634185497: Terminada sessão de ETL 8778632945253
+28/08/2024 10:04:25 Sessão 8787843543201: Iniciando sessão 8787848172453 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/teste
+28/08/2024 10:04:47 Sessão 8787843543201: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE']] do Oracle schema 'LUCAS' para Postgres database teste schema 'public'!
+28/08/2024 10:04:56 Sessão 8787843543201: Migração concluída com sucesso!
+28/08/2024 10:04:56 Sessão 8787843543201: Arquivo de backup não encontrado, prosseguindo...
+28/08/2024 10:04:56 Sessão 8787843543201: Terminada sessão de ETL 8787838055057
