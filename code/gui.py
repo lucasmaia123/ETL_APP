@@ -343,7 +343,7 @@ class Oracle2Postgres(tk.Toplevel):
         self.setup['create_database'] = []
         self.setup['owner_database'] = None
         self.setup['delete_database'] = []
-        self.setup['create_schema'] = []
+        self.setup['create_schema'] = None
         self.setup['delete_schema'] = []
         self.setup['owner_schema'] = None
         self.setup['connect'] = None
@@ -583,7 +583,7 @@ class Oracle2Postgres(tk.Toplevel):
             if schema != 'public':
                 self.setup['owner_schema'] = [self.pg_user, schema]
         else:
-            self.setup['create_schema'].append(schema)
+            self.setup['create_schema'] = schema
 
         self.pg_schema = schema.lower()
         tables = []
@@ -619,9 +619,9 @@ class Oracle2Postgres(tk.Toplevel):
             su_cb = ttk.Checkbutton(window, text='Criar usuário como superuser', variable=superuser, onvalue=True, offvalue=False)
             su_cb.pack(padx=20, pady=10)
         create_db = tk.BooleanVar()
-        c1 = ttk.Checkbutton(window, text='Migrar usuário para a base de dados conectada', variable=create_db, onvalue=False)
+        c1 = ttk.Checkbutton(window, text='Migrar usuário para a base de dados conectada', variable=create_db, onvalue=False, tooltip='Cria o usuário nos conformes do Postgres, onde o usuário é algo abstrato e é dono de vários objetos\nNeste caso o usuário será dono de um schema com o mesmo nome que o seu')
         c1.pack(padx=10, pady=10)
-        c2 = ttk.Checkbutton(window, text='Criar nova base de dados', variable=create_db, onvalue=True)
+        c2 = ttk.Checkbutton(window, text='Criar nova base de dados', variable=create_db, onvalue=True, tooltip="Preserva o contexto do Oracle, onde o usuário possui apenas 1 schema.\nNeste modo o usuário será dono do schema 'public' em um novo db")
         c2.pack(padx=10)
         c1.invoke()
         ttk.Button(window, text='Cancelar', command=window.destroy).pack(side='left', padx=20, pady=10)
@@ -686,41 +686,42 @@ class Oracle2Postgres(tk.Toplevel):
     def migrate_user(self, user, password, create_db=False, superuser = False, new_user=True, window=None):
         if not user or not password:
             return
-        # Checa se a senha fornecida está correta quando mantendo um usuário já existente
-        elif user.lower() in self.pg_users and not new_user:
-            try:
-                test_conn = psycopg2.connect(dbname=self.pg_database, user=user.lower(), password=password, host=self.pg_host, port=self.pg_port)
-                test_conn.close()
-            except:
-                self.message_window(f'Senha fornecida não é válida para o usuário {user.lower()}')
-                return
-        else:
-            window.destroy()
-
-        cur = self.pg_conn.cursor()
         user = user.lower()
 
-        # Checa se usuário Postgres pode criar um db
-        if create_db:
-            query = f"SELECT usecreatedb FROM pg_user WHERE usename = '{self.pg_user}'"
-            cur.execute(query)
-            priv = cur.fetchone()
-            if priv[0] == 'false':
-                self.message_window(f'Usuário {self.pg_user} não tem permissão para criar banco de dados!')
-                return
-
-        if new_user:
-            if user.lower() in self.pg_users:
-                # Agenda deleção de objetos e databases pertencentes ao usuário
-                query = f"select datname from pg_database as db join pg_roles as role on db.datdba = role.oid where role.rolname = '{user}'"
-                for db in self.pg_databases:
-                    self.setup['delete_database'].append(db)
-                self.setup['delete_user'] = user
-
-            if superuser:
-                self.setup['create_superuser'] = [user, password]
+        if self.mode == 'direct':
+            # Checa se a senha fornecida está correta quando mantendo um usuário já existente
+            if user.lower() in self.pg_users and not new_user:
+                try:
+                    test_conn = psycopg2.connect(dbname=self.pg_database, user=user.lower(), password=password, host=self.pg_host, port=self.pg_port)
+                    test_conn.close()
+                except:
+                    self.message_window(f'Senha fornecida não é válida para o usuário {user.lower()}')
+                    return
             else:
-                self.setup['create_user'] = [user, password]
+                window.destroy()
+            cur = self.pg_conn.cursor()
+
+            # Checa se usuário Postgres pode criar um db
+            if create_db:
+                query = f"SELECT usecreatedb FROM pg_user WHERE usename = '{self.pg_user}'"
+                cur.execute(query)
+                priv = cur.fetchone()
+                if priv[0] == 'false':
+                    self.message_window(f'Usuário {self.pg_user} não tem permissão para criar banco de dados!')
+                    return
+
+            if new_user:
+                if user.lower() in self.pg_users:
+                    # Agenda deleção de objetos e databases pertencentes ao usuário
+                    query = f"select datname from pg_database as db join pg_roles as role on db.datdba = role.oid where role.rolname = '{user}'"
+                    for db in self.pg_databases:
+                        self.setup['delete_database'].append(db)
+                    self.setup['delete_user'] = user
+
+                if superuser:
+                    self.setup['create_superuser'] = [user, password]
+                else:
+                    self.setup['create_user'] = [user, password]
         
         # Migra todas as tabelas e procedures relacionadas ao usuário
         query = f"SELECT table_name FROM all_tables WHERE owner = '{user.upper()}'"
@@ -733,27 +734,35 @@ class Oracle2Postgres(tk.Toplevel):
         # Cria nova base de dados com o nome do usuário
         # Migrar usuário 'exemplo' criará o db 'exemplo' com o único schema 'public' e dará todas as permissões para o usuário 'exemplo' no db 'exemplo'
         if create_db:
-            # Checa se o database existe
-            if user not in self.pg_databases:
-                self.setup['create_database'] = user
+            if self.mode == 'direct':
+                # Checa se o database existe
+                if user not in self.pg_databases:
+                    self.setup['create_database'] = user
+                else:
+                    res = self.database_exists(user)
+                    if res == 'delete':
+                        self.setup['delete_database'].append(user)
+                        self.setup['create_database'].append(user)
+                    elif not res:
+                        return
             else:
-                res = self.database_exists(user)
-                if res == 'delete':
-                    self.setup['delete_database'].append(user)
-                    self.setup['create_database'].append(user)
-                elif not res:
-                    return
+                self.setup['create_database'] = user
             self.setup['owner_database'] = [user, user]
-            new_pg_url = f"jdbc:postgresql://{self.pg_host}:{self.pg_port}/{user}"
+            if self.mode == 'direct':
+                new_pg_url = f"jdbc:postgresql://{self.pg_host}:{self.pg_port}/{user}"
+            else:
+                new_pg_url = ''
             self.setup['connect'] = {'url': new_pg_url, 'user': user, 'password': password, 'database': user}
-            self.write2log(f'Conectado no database {user} com novo usuário {user}')
             self.pg_schema = 'public'
         # Cria apenas o schema com o nome do usuário e insere no DB atual
         else:
-            pg_schemas = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query='SELECT nspname FROM pg_namespace').load().collect()
-            pg_schemas = [pg_schemas[i]['nspname'] for i in range(len(pg_schemas))]
-            if user not in pg_schemas:
-                self.setup['create_schema'].append(user)
+            if self.mode == 'direct':
+                pg_schemas = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query='SELECT nspname FROM pg_namespace').load().collect()
+                pg_schemas = [pg_schemas[i]['nspname'] for i in range(len(pg_schemas))]
+                if user not in pg_schemas:
+                    self.setup['create_schema'] = user
+            else:
+                self.setup['create_schema'] = user
             self.setup['owner_schema'] = [user, user]
             self.pg_schema = user
             cur.close()
