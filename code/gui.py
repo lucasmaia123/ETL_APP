@@ -214,7 +214,7 @@ class etl_UI(tk.Frame):
                         self.ora_dba = True
                 except:
                     pass
-            Oracle2Postgres(self, etl, 'Script')
+            Oracle2Postgres(self, etl, 'script')
             response.config(text='')
 
         # Estabelece conexão para migração direta
@@ -932,11 +932,14 @@ class Oracle2Postgres(tk.Toplevel):
 
     # Idem com seleção de tabelas, mas agora para procedimentos guardados
     def source_selection_window(self, tables, s_mode):
-        if type(tables) == list:
+        if type(tables) != list:
             aux = tables
             tables = []
             for i in aux.curselection():
-                tables.append(aux.get(i))
+                tables.append([self.user, aux.get(i)])
+            self.pg_schema = self.schema_entry.get()
+            if self.pg_schema == '':
+                self.pg_schema = 'public'
         if s_mode < 2:
             window = tk.Toplevel(self)
             window.geometry('600x400')
@@ -1377,12 +1380,16 @@ class Oracle2Postgres(tk.Toplevel):
                     pass
                 else:
                     return
-        etl_session = Oracle2PostgresETL(self.master, pg_conf, ora_conf, self.user, tables, sources, self.etl, self.pg_jar, self.ora_jar, self.pg_schema, self.setup, self.table_data)
-        self.write2log(f"migrando tabelas {tables} e sources {sources} do Oracle schema '{self.user}' para Postgres database {self.pg_database} schema '{self.pg_schema}'!")
-        self.active_sessions.append(etl_session)
-        # Começa a migração
-        etl_session.setup_processing()
-        etl_session.start_etl()
+            etl_session = Oracle2PostgresETL(self.master, pg_conf, ora_conf, self.user, tables, sources, self.etl, self.pg_jar, self.ora_jar, self.pg_schema, self.setup, self.table_data, 'direct')
+            self.write2log(f"migrando tabelas {tables} e sources {sources} do Oracle schema '{self.user}' para Postgres database {self.pg_database} schema '{self.pg_schema}'!")
+            self.active_sessions.append(etl_session)
+            # Começa a migração
+            etl_session.setup_processing_direct()
+            etl_session.start_etl()
+        elif self.mode == 'script':
+            etl_session = Oracle2PostgresETL(self.master, pg_conf, ora_conf, self.user, tables, sources, self.etl, self.pg_jar, self.ora_jar, self.pg_schema, self.setup, self.table_data, 'script')
+            self.write2log(f'Gerando script para migração de Oracle para Postgres')
+            self.active_sessions.append(etl_session)
         self.wait4ETL(etl_session)
         if self.ora_dba:
             self.draw_schema_selection_window()
@@ -1395,21 +1402,25 @@ class Oracle2Postgres(tk.Toplevel):
         # caso encontre um método mais elegante para esperar o processo, sinta-se livre para substituir
         while session._state == 'idle' or session._state == 'executing':
             sleep(1)
-        if session._state == 'success':
-            self.write2log('Migração concluída com sucesso!')
-        elif session._state == 'failed':
-            self.write2log('Migração falhou! Retornando base de dados para estado anterior...')
+        if self.mode == 'direct':
+            if session._state == 'success':
+                self.write2log('Migração concluída com sucesso!')
+            elif session._state == 'failed':
+                self.write2log(f'Migração falhou!\nFalha: {session.error_message}\nRetornando base de dados para estado anterior...')
+                if self.full_backup:
+                    self.restore_from_backup()
+                else:
+                    self.restore_from_backup(self.pg_schema)
+                self.write2log('Base de dados retornada ao último estado estável')
             if self.full_backup:
-                self.restore_from_backup()
+                self.remove_backup()
             else:
-                self.restore_from_backup(self.pg_schema)
-            self.write2log('Base de dados retornada ao último estado estável')
-            print('Falha:')
-            print(session.error_message)
-        if self.full_backup:
-            self.remove_backup()
-        else:
-            self.remove_backup(self.pg_schema)
+                self.remove_backup(self.pg_schema)
+        elif self.mode == 'script':
+            if session._state == 'success':
+                self.write2log('Script criado com sucesso!')
+            elif session._state == 'failed':
+                self.write2log(f'Criação do script falhou!\nFalha: {session.error_message}')
         self.active_sessions.remove(session)
         self.write2log(f'Terminada sessão de ETL {self.etl.__hash__()}')
         del session

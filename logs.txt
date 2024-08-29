@@ -292,3 +292,36 @@
 28/08/2024 10:04:56 Sessão 8787843543201: Migração concluída com sucesso!
 28/08/2024 10:04:56 Sessão 8787843543201: Arquivo de backup não encontrado, prosseguindo...
 28/08/2024 10:04:56 Sessão 8787843543201: Terminada sessão de ETL 8787838055057
+29/08/2024 11:10:17 Sessão 8763184913885: Gerando script para migração de Oracle para Postgres
+29/08/2024 11:18:56 Sessão 8779799032517: Gerando script para migração de Oracle para Postgres
+29/08/2024 11:19:00 Sessão 8779799032517: Criação do script falhou!
+Falha: 'dict' object has no attribute 'toPandas'
+29/08/2024 11:19:00 Sessão 8779799032517: Terminada sessão de ETL 8779795888137
+29/08/2024 11:37:13 Sessão 8753048150605: Gerando script para migração de Oracle para Postgres
+29/08/2024 11:37:20 Sessão 8753048150605: Criação do script falhou!
+Falha: 'Oracle2PostgresETL' object has no attribute 'pg_conn'
+29/08/2024 11:37:20 Sessão 8753048150605: Terminada sessão de ETL 8753040948301
+29/08/2024 11:42:45 Sessão 8743020810129: Gerando script para migração de Oracle para Postgres
+29/08/2024 11:42:53 Sessão 8743020810129: Script criado com sucesso!
+29/08/2024 11:42:53 Sessão 8743020810129: Terminada sessão de ETL 8743019591329
+29/08/2024 11:47:00 Sessão 8727200215969: Gerando script para migração de Oracle para Postgres
+29/08/2024 11:47:08 Sessão 8727200215969: Script criado com sucesso!
+29/08/2024 11:47:08 Sessão 8727200215969: Terminada sessão de ETL 8727198996273
+29/08/2024 11:56:14 Sessão 8777990950889: Gerando script para migração de Oracle para Postgres
+29/08/2024 11:56:27 Sessão 8777990950889: Criação do script falhou!
+Falha: 'dict' object is not callable
+29/08/2024 11:56:27 Sessão 8777990950889: Terminada sessão de ETL 8777990456009
+29/08/2024 12:02:29 Sessão 8793598280865: Gerando script para migração de Oracle para Postgres
+29/08/2024 12:02:44 Sessão 8793598280865: Script criado com sucesso!
+29/08/2024 12:02:44 Sessão 8793598280865: Terminada sessão de ETL 8793593265093
+29/08/2024 12:07:41 Sessão 8744731204605: Gerando script para migração de Oracle para Postgres
+29/08/2024 12:07:58 Sessão 8744731204605: Script criado com sucesso!
+29/08/2024 12:07:58 Sessão 8744731204605: Terminada sessão de ETL 8744721147605
+29/08/2024 12:14:29 Sessão 8768276214693: Gerando script para migração de Oracle para Postgres
+29/08/2024 12:14:49 Sessão 8768276214693: Script criado com sucesso!
+29/08/2024 12:14:49 Sessão 8768276214693: Terminada sessão de ETL 8768274993981
+29/08/2024 12:20:05 Sessão 8774091471001: Iniciando sessão 8774127259385 de Oracle jdbc:oracle:thin:@//localhost:1521/ORCLPDB1 para Postgres jdbc:postgresql://localhost:5432/teste
+29/08/2024 12:20:49 Sessão 8774091471001: Criando backup do schema public
+29/08/2024 12:20:50 Sessão 8774091471001: migrando tabelas [['LUCAS', 'CARS'], ['LUCAS', 'EMPLOYEES'], ['LUCAS', 'FOREIGN_TEST'], ['LUCAS', 'PK_TESTE'], ['LUCAS', 'REPORTS'], ['LUCAS', 'TESTE']] e sources [['LUCAS', 'TRIG_TEST', 'TRIGGER'], ['LUCAS', 'TEST_VIEW', 'VIEW'], ['LUCAS', 'CAR_OWNER', 'PROCEDURE'], ['LUCAS', 'GERA_TESTE_ID', 'TRIGGER'], ['LUCAS', 'TESTE_TRIG', 'TRIGGER'], ['LUCAS', 'SEQ_TESTE', 'SEQUENCE']] do Oracle schema 'LUCAS' para Postgres database teste schema 'public'!
+29/08/2024 12:21:00 Sessão 8774091471001: Migração concluída com sucesso!
+29/08/2024 12:21:00 Sessão 8774091471001: Terminada sessão de ETL 8774090209061

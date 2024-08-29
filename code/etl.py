@@ -5,6 +5,7 @@ from pyspark.sql.functions import *
 import pandas as pd
 import tkinter as tk
 from tkinter import ttk
+from tkinter import filedialog
 from tkinter.scrolledtext import ScrolledText
 import psycopg2
 import oracledb
@@ -75,6 +76,8 @@ class ETL_session_UI(tk.Toplevel):
 
     def draw_app_window(self):
         self.geometry('500x600')
+        for object in self.winfo_children():
+            object.destroy()
         self.information_label = ttk.Label(self, text='Migração em progresso...')
         self.information_label.pack(pady=10)
 
@@ -117,7 +120,7 @@ class ETL_session_UI(tk.Toplevel):
             process.cancel()
             del process
         self.S.acquire()
-        if not self.pg_conn.closed:
+        if self.pg_conn:
             self.pg_conn.close()
         if self.ora_conn:
             self.ora_conn.close()
@@ -128,19 +131,33 @@ class Oracle2PostgresETL(ETL_session_UI):
     def __init__(self, master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup, table_data, mode):
         super().__init__(master, pg_conf, ora_conf, user, tables, sources, etl, pg_jar, ora_jar, schema, setup, table_data)
         self.mode = mode
-        if mode == 'script':
-            self.script_body = []
         # Conexões genéricas para execução de DML/DDL (PySpark apenas executa queries para coleta de dados)
         # (auto-commit ON, usar a função commit() ou fetch() em operações DML/DDL causará erro,
         #  operações DML/DDL executadas seram aplicadas na base de dados automaticamente!)
         if mode == 'direct':
             self.pg_conn = psycopg2.connect(dbname=self.pg_database, user=self.pg_user, password=self.pg_password, host=self.pg_host, port=self.pg_port)
             self.pg_conn.autocommit = True
+        else:
+            self.pg_conn = None
         if self.ora_user.lower() == 'sys':
             self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=oracledb.AUTH_MODE_SYSDBA)
         else:
             self.ora_conn = oracledb.connect(user=self.ora_user, password=self.ora_password, host=self.ora_host, port=self.ora_port, service_name=self.ora_service, mode=oracledb.AUTH_MODE_DEFAULT)
         self.ora_conn.autocommit = True
+        if mode == 'script':
+            self.script_body = []
+            ttk.Label(self, text='Dê um nome para o script:').pack(padx=10, pady=10)
+            entry = ttk.Entry(self, width=20)
+            entry.pack(padx=10, pady=10)
+            entry.insert(0, f'Oracle2Postgres_{self.__hash__()}')
+            ttk.Button(self, text='Prosseguir', command=lambda:self.get_script_address(entry.get())).pack(padx=10, pady=10)            
+
+    def get_script_address(self, name):
+        if len(name) == 0:
+            return
+        filename = filedialog.askdirectory(initialdir=APP_HOME, title='Especifique onde o script será salvo:')
+        self.script_address = os.path.join(filename, f'{name}.sql')
+        self.setup_processing_script()
 
     def setup_processing_direct(self):
         cur = self.pg_conn.cursor()
@@ -191,36 +208,44 @@ class Oracle2PostgresETL(ETL_session_UI):
 
     def setup_processing_script(self):
         if len(self.setup.values()) > 0:
-            self.script_body.append('-- Preparação pré migração')
+            self.script_body.append('-- Preparação pré migração\n')
         for db in self.setup['delete_database']:
-            self.script_body.append(f'DROP DATABASE {db} WITH (FORCE)')
+            self.script_body.append(f'DROP DATABASE {db} WITH (FORCE)\n')
         for db in self.setup['create_database']:
-            self.script_body.append(f'CREATE DATABASE {db}')
+            self.script_body.append(f'CREATE DATABASE {db}\n')
         if self.setup['delete_user']:
-            self.script_body.append(f"DROP OWNED BY {self.setup['delete_user']} CASCADE")
-            self.script_body.append(f"DROP USER {self.setup['delete_user']}")
+            self.script_body.append(f"DROP OWNED BY {self.setup['delete_user']} CASCADE\n")
+            self.script_body.append(f"DROP USER {self.setup['delete_user']}\n")
         if self.setup['create_superuser']:
             user = self.setup['create_superuser'][0]
             password = self.setup['create_superuser'][1]
-            self.script_body.append(f'CREATE SUPERUSER {user} WITH PASSWORD {password}')
+            self.script_body.append(f'CREATE SUPERUSER {user} WITH PASSWORD {password}\n')
         if self.setup['create_user']:
             user = self.setup['create_user'][0]
             password = self.setup['create_user'][1]
-            self.script_body.append(f'CREATE USER {user} WITH PASSWORD {password}')
+            self.script_body.append(f'CREATE USER {user} WITH PASSWORD {password}\n')
         if self.setup['owner_database']:
             owner = self.setup['owner_database']
-            self.script_body.append(f'GRANT CONNECT ON DATABASE {owner[0]} TO {owner[1]}')
-            self.script_body.append(f'ALTER DATABASE {owner[0]} OWNER TO {owner[1]}')
+            self.script_body.append(f'GRANT CONNECT ON DATABASE {owner[0]} TO {owner[1]}\n')
+            self.script_body.append(f'ALTER DATABASE {owner[0]} OWNER TO {owner[1]}\n')
         if self.setup['connect']:
-            self.script_body.append(f"CONNECT -U {self.setup['connect']['user']} -p {self.setup['connect']['password']} -d {self.setup['connect']['database']}")
+            self.script_body.append(f"CONNECT -U {self.setup['connect']['user']} -p {self.setup['connect']['password']} -d {self.setup['connect']['database']}\n")
         if self.setup['create_schema']:
-            self.script_body.append(f"DROP SCHEMA IF EXISTS {self.setup['create_schema']} CASCADE")
-            self.script_body.append(f"CREATE SCHEMA {self.setup['create_schema']}")
+            self.script_body.append(f"DROP SCHEMA IF EXISTS {self.setup['create_schema']} CASCADE\n")
+            self.script_body.append(f"CREATE SCHEMA {self.setup['create_schema']}\n")
         if self.setup['owner_schema']:
             owner = self.setup['owner_schema']
-            self.script_body.append(f'GRANT USAGE ON SCHEMA {owner[0]} TO {owner[1]}')
-            self.script_body.append(f'ALTER DEFAULT PRIVILEGES IN SCHEMA {owner[0]} GRANT ALL PRIVILEGES ON TABLES TO {owner[1]}')
-            self.script_body.append(f'ALTER SCHEMA {owner[0]} TO {owner[1]}')
+            self.script_body.append(f'GRANT USAGE ON SCHEMA {owner[0]} TO {owner[1]}\n')
+            self.script_body.append(f'ALTER DEFAULT PRIVILEGES IN SCHEMA {owner[0]} GRANT ALL PRIVILEGES ON TABLES TO {owner[1]}\n')
+            self.script_body.append(f'ALTER SCHEMA {owner[0]} TO {owner[1]}\n')
+        self.start_etl()
+
+    def create_script_file(self):
+        with open(self.script_address, "w") as file:
+            print(self.script_address)
+            for line in self.script_body:
+                file.write(line)
+            file.close()
 
     # Começa a extrair os dados das tabelas do cluster cujo foi estabelecida a conexão
     @threaded
@@ -301,9 +326,8 @@ class Oracle2PostgresETL(ETL_session_UI):
             self.information_label.config(text='Migração concluída!')
             self.button.config(text='Ok')
             self._state = 'success'
-            if mode == 'script':
-                for line in self.script_body:
-                    print(line)
+            if self.mode == 'script':
+                self.create_script_file()
         except Exception as e:
             self.write2display('Migração falhou!')
             self._state = 'failed'
@@ -402,7 +426,7 @@ class Oracle2PostgresETL(ETL_session_UI):
         if self.mode == 'direct':
             res = self.load_table(table_data, table)
         elif self.mode == 'script':
-            res = self.create_script(table_data, table)
+            res = self.load_table_script(table_data, table)
         return [res, table, None]
 
     # Carrega dados de uma tabela para a base de dados alvo
@@ -492,11 +516,24 @@ class Oracle2PostgresETL(ETL_session_UI):
     def load_table_script(self, df, tbl):
         schema = tbl[0].lower()
         table = tbl[1].lower()
-        pandas_df = df.toPandas()
+        pandas_df = df['data'].toPandas()
         table_skeleton = pd.io.sql.get_schema(pandas_df.reset_index(), f'{schema}.{table}')
-        self.script_body.append(table_skeleton)
+        self.script_body.append(f'{table_skeleton}\n')
         for index, row in pandas_df.iterrows():
-            self.script_body.append(f"INSERT INTO {schema}.{table} ({', '.join(pandas_df.columns)}) VALUES {tuple(row.values)}")
+            self.script_body.append(f"INSERT INTO {schema}.{table} ({', '.join(pandas_df.columns)}) VALUES {tuple(row.values)}\n")
+        # Adiciona dependencia de chave primária
+        pk_columns = self.list2str(df['pk'])
+        self.script_body.append(f"ALTER TABLE {self.pg_schema}.{table} ADD PRIMARY KEY {pk_columns}\n")
+        if df['auto']:
+            last_val = df['data'].agg({df['auto']: 'max'}).collect()[0]
+            # Checa se existe algum dado na tabela
+            if last_val[f"max({df['auto']})"]:
+                self.script_body.append(f'''CREATE SEQUENCE {self.pg_schema}.{table}_{df['auto'].lower()}_seq START WITH {int(last_val[f"max({df['auto']})"]) + 1}\n''')
+                self.script_body.append(f'''ALTER TABLE {self.pg_schema}.{table} ALTER COLUMN "{df['auto'].lower()}" SET DEFAULT nextval('{self.pg_schema}.{table}_{df['auto'].lower()}_seq')\n''')
+        # Adiciona dependencias de chaves estrangeiras
+        if df['fk']:
+            for key, value in df['fk'].items():
+                self.script_body.append(f"ALTER TABLE {self.pg_schema}.{value['src_table'].lower()} ADD CONSTRAINT {key} FOREIGN KEY {self.list2str(value['src_column'])} REFERENCES {self.pg_schema}.{value['ref_table'].lower()} {self.list2str(value['ref_column'])} ON DELETE {value['on_delete']}\n")
 
     # Adapta o texto do script para o contexto do SGBD para o qual sera migrado
     def transform_sql_script(self, data):
@@ -752,9 +789,14 @@ class Oracle2PostgresETL(ETL_session_UI):
             else:
                 func_body += data[i] + ' '
         func_body += '\nEND;\n$$;'
-        cur = self.pg_conn.cursor()
-        cur.execute(func_body)
-        cur.close()
+        if self.mode == 'direct':
+            cur = self.pg_conn.cursor()
+            cur.execute(func_body)
+            cur.close()
+        else:
+            for line in func_body:
+                self.script_body.append(line)
+            self.script_body.append('\n\n')
         self.write2display(f"Bloco plsql encapsulado na função {fn_name}!")
         return fn_name
 
@@ -1016,9 +1058,10 @@ class Oracle2PostgresETL(ETL_session_UI):
                 print(f'Error: ' + str(e))
                 return 'failed'
         elif self.mode == 'script':
-            self.script_body.append(f'DROP {type} {source_name} CASCADE')
+            self.script_body.append(f'DROP {type} {source_name} CASCADE\n')
             for line in source_body:
                 self.script_body.append(line)
+            self.script_body.append('\n\n')
             return 'done'
 
     # Testa se a tradução do plsql ocorreu sem erros
