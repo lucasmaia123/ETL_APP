@@ -66,18 +66,20 @@ def file_explorer(entry):
         entry.delete(0, tk.END)
         entry.insert(tk.END, filename)
 
-# Localização do JDK e drivers
+# Tenta Localizar o JDK e drivers
 try:
     if os.environ['JAVA_HOME']:
         start_app()
     else:
         raise Exception
 except:
+    # Localização padrão do JDK no Linux
     if os.path.exists('/lib/jvm/'):
         for directory in os.listdir('/lib/jvm/'):
             if 'jdk' in directory.lower():
                 get_jdk(os.path.join('/lib/jvm', directory))
                 break
+    # Localização padrão do JDK no Windows
     elif os.path.exists('C://program files/java/'):
         for directory in os.listdir('C://program files/java/'):
             if 'jdk' in directory.lower():

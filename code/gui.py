@@ -31,6 +31,9 @@ def threaded(func):
         return threading.Thread(target=func, args=args, kwargs=kwargs, daemon=True).start()
     return wrapper
 
+ORA_DRIVER = "oracle.jdbc.driver.OracleDriver"
+PG_DRIVER = "org.postgresql.Driver"
+
 class etl_UI(tk.Frame):
 
     no_backup = False
@@ -46,6 +49,7 @@ class etl_UI(tk.Frame):
         self.ora_jar = ora_jar
         self.pg_conn = None
         self.ora_conn = None
+        self.etl = None
         s = ttk.Style(master)
         s.configure('White.TRadiobutton', background='white', foreground='black')
         s.configure('White.TCheckbutton', background='white', foreground='black')
@@ -59,15 +63,19 @@ class etl_UI(tk.Frame):
                 self.pg_conn.close()
         if self.ora_conn:
             self.ora_conn.close()
+        if self.etl:
+            self.etl.stop()
         self.master.quit()
         self.master.destroy()
 
     # Desenha menu de login
-    def draw_start_menu(self, child=None):
+    def draw_start_menu(self):
 
         # limpa a janela
-        if child:
+        for child in self.winfo_children():
             child.destroy()
+        if self.etl:
+            self.etl.stop()
         super().__init__(self.master)
         self.pack()
 
@@ -150,9 +158,6 @@ class etl_UI(tk.Frame):
 
     # Coleta os atributos que o usuário forneceu e cria variáveis de conexão
     def initialize_conn(self, response,  mode=''):
-        
-        self.ora_driver = "oracle.jdbc.driver.OracleDriver"
-        self.pg_driver = "org.postgresql.Driver"
 
         self.ora_host = self.ora_host_entry.get()
         self.ora_port = self.ora_port_entry.get()
@@ -208,7 +213,7 @@ class etl_UI(tk.Frame):
             else:
                 try:
                     query = f"SELECT granted_role FROM dba_role_privs WHERE grantee = '{self.ora_user.upper()}'"
-                    priv = etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+                    priv = etl.read.format('jdbc').options(driver=ORA_DRIVER, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
                     priv = [priv[i]['GRANTED_ROLE'] for i in range(len(priv))]
                     if 'DBA' in priv:
                         self.ora_dba = True
@@ -234,7 +239,7 @@ class etl_UI(tk.Frame):
             else:
                 try:
                     query = f"SELECT granted_role FROM dba_role_privs WHERE grantee = '{self.ora_user.upper()}'"
-                    priv = etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+                    priv = etl.read.format('jdbc').options(driver=ORA_DRIVER, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
                     priv = [priv[i]['GRANTED_ROLE'] for i in range(len(priv))]
                     if 'DBA' in priv:
                         self.ora_dba = True
@@ -242,7 +247,7 @@ class etl_UI(tk.Frame):
                     pass
             # Checa se é superuser no Postgresql
             query = f"SELECT usesuper FROM pg_user WHERE usename = '{self.pg_user}'"
-            superuser = etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query=query).load().collect()
+            superuser = etl.read.format('jdbc').options(driver=PG_DRIVER, user=self.pg_user, password=self.pg_password, url=self.pg_url, query=query).load().collect()
             superuser = superuser[0]['usesuper']
             if superuser:
                 self.pg_superuser = True
@@ -319,17 +324,14 @@ class etl_UI(tk.Frame):
             log_file.close()
 
 # Classe para preparação do ETL de Oracle para Postgres
-class Oracle2Postgres(tk.Toplevel):
+class Oracle2Postgres(etl_UI):
     
     def __init__(self, master, conn_session, mode):
-        super().__init__(master)
-        self.protocol('WM_DELETE_WINDOW', self.close)
         self.title('Oracle para Postgres')
-        self_refs = dir(self)
         self.etl = conn_session
-        for key in dir(master):
-            # Black magic
-            if key[0] != '_' and key not in self_refs:
+        # Black magic
+        for key in dir(super()):
+            if key[0] != '_' and key:
                 exec(f'self.{key} = master.{key}')
         self.master = master
         self.mode = mode
@@ -360,11 +362,6 @@ class Oracle2Postgres(tk.Toplevel):
         else:
             self.draw_table_selection_window(self.ora_user.upper())
 
-    def close(self):
-        print('proper closure')
-        self.etl.stop()
-        self.destroy()
-
     def execute_query(self, type, query):
         try:
             if type == 'pg':
@@ -384,6 +381,7 @@ class Oracle2Postgres(tk.Toplevel):
     # Cria um backup de um schema ou de toda a base de dados antes de realizar o ETL.
     def create_backup(self, schema=None):
         try:
+            # Backup utiliza o pg_dump, logo é necessário ter o Postgresql instalado mesmo que esteja fazendo a conexão com um servidor não local
             if schema:
                 BACKUP_FILE = os.path.join(APP_HOME, f'backups/{schema}_backup.dmp')
                 command = f"pg_dump --no-password -h {self.pg_host} -p {self.pg_port} -d {self.pg_database} -U {self.pg_user} -n {schema} -Fc -f {BACKUP_FILE}"
@@ -480,7 +478,7 @@ class Oracle2Postgres(tk.Toplevel):
         ttk.Checkbutton(lower_frame, text='Migrar usuário (Cria novo usuário e migra todo o schema)', variable=self.migration_mode, onvalue=1).pack(padx=20, pady=10)
         ttk.Checkbutton(lower_frame, text='Migrar schema (Migra todo o schema sem criar novo usuário)', variable=self.migration_mode, onvalue=2).pack(padx=20, pady=10)
         mmref.invoke()
-        ttk.Button(lower_frame, text='Cancelar', command=self.close).pack(side='left', padx=20, pady=10)
+        ttk.Button(lower_frame, text='Cancelar', command=self.draw_start_menu).pack(side='left', padx=20, pady=10)
         ttk.Button(lower_frame, text='Prosseguir', command=lambda:self.pass_schema_selection(listbox)).pack(side='right', padx=20, pady=10)
 
     # Função auxiliar para a seleção de schema
@@ -725,10 +723,10 @@ class Oracle2Postgres(tk.Toplevel):
         
         # Migra todas as tabelas e procedures relacionadas ao usuário
         query = f"SELECT table_name FROM all_tables WHERE owner = '{user.upper()}'"
-        tables = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+        tables = self.etl.read.format('jdbc').options(driver=ORA_DRIVER, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
         tables = [[user.upper(), tables[i]['TABLE_NAME']] for i in range(len(tables))]
         query = f"SELECT name, type FROM all_source where owner = '{user.upper()}' AND line = 1 UNION SELECT view_name, 'VIEW' FROM all_views where owner = '{user.upper()}'"
-        sources = self.etl.read.format('jdbc').options(driver=self.ora_driver, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
+        sources = self.etl.read.format('jdbc').options(driver=ORA_DRIVER, user=self.ora_user, password=self.ora_password, url=self.ora_url, query=query).load().collect()
         sources = [[user.upper(), sources[i]['NAME'], sources[i]['TYPE']] for i in range(len(sources))]
 
         # Cria nova base de dados com o nome do usuário
@@ -757,7 +755,7 @@ class Oracle2Postgres(tk.Toplevel):
         # Cria apenas o schema com o nome do usuário e insere no DB atual
         else:
             if self.mode == 'direct':
-                pg_schemas = self.etl.read.format('jdbc').options(driver=self.pg_driver, user=self.pg_user, password=self.pg_password, url=self.pg_url, query='SELECT nspname FROM pg_namespace').load().collect()
+                pg_schemas = self.etl.read.format('jdbc').options(driver=PG_DRIVER, user=self.pg_user, password=self.pg_password, url=self.pg_url, query='SELECT nspname FROM pg_namespace').load().collect()
                 pg_schemas = [pg_schemas[i]['nspname'] for i in range(len(pg_schemas))]
                 if user not in pg_schemas:
                     self.setup['create_schema'] = user
@@ -836,12 +834,11 @@ class Oracle2Postgres(tk.Toplevel):
         if self.ora_dba:
             ttk.Button(lower_frame, text='Voltar', command=self.draw_schema_selection_window).pack(side='left', padx=20, pady=20)
         else:
-            ttk.Button(lower_frame, text='Cancelar', command=self.close).pack(side='left', padx=20, pady=20)
+            ttk.Button(lower_frame, text='Cancelar', command=self.draw_start_menu).pack(side='left', padx=20, pady=20)
         if self.mode == 'direct':
             ttk.Button(lower_frame, text='Prosseguir', command=lambda: self.check_existing_tables(listbox, s_mode.get(), user_migration.get())).pack(side='right', padx=20, pady=20)
         else:
             ttk.Button(lower_frame, text='Prosseguir', command=lambda: self.source_selection_window(listbox, s_mode.get())).pack(side='right', padx=20, pady=20)
-
 
     # Checa se as tabelas a serem migradas já existem no schema
     def check_existing_tables(self, table_listbox, s_mode, user_migration):
