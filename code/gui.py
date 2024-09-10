@@ -324,13 +324,13 @@ class etl_UI(tk.Frame):
             log_file.close()
 
 # Classe para preparação do ETL de Oracle para Postgres
-class Oracle2Postgres(etl_UI):
+class Oracle2Postgres:
     
     def __init__(self, master, conn_session, mode):
         self.title('Oracle para Postgres')
         self.etl = conn_session
         # Black magic
-        for key in dir(super()):
+        for key in dir(window):
             if key[0] != '_' and key:
                 exec(f'self.{key} = master.{key}')
         self.master = master
@@ -400,8 +400,6 @@ class Oracle2Postgres(etl_UI):
             return True
         except:
             self.write2log('pg_dump não instalado, backup não efetuado!')
-            if self.window.winfo_exists():
-                self.window.destroy()
             window = tk.Toplevel(self)
             var = tk.BooleanVar()
             var.set(False)
@@ -454,8 +452,8 @@ class Oracle2Postgres(etl_UI):
         schemas = self.execute_query('ora', query)
         schemas = [schemas[i][0] for i in range(len(schemas))]
 
-        ttk.Label(self, text='Conectado como usuário do sistema\nSelecione o usuário/schema que deseja migrar').pack(padx=20, pady=10)
-        user_frame = ttk.Frame(self, height=300)
+        ttk.Label(self.master, text='Conectado como usuário do sistema\nSelecione o usuário/schema que deseja migrar').pack(padx=20, pady=10)
+        user_frame = ttk.Frame(self.master, height=300)
         user_frame.pack(fill='x', expand=True)
 
         scrollBar = tk.Scrollbar(user_frame, orient='vertical')
@@ -795,8 +793,8 @@ class Oracle2Postgres(etl_UI):
         tables = [tables[i][0] for i in range(len(tables))]
 
         # Seleção de tabelas
-        ttk.Label(self, text='Tabelas disponiveis para migração\nSelecione as tabelas que deseja migrar:').pack(padx=20, pady=10)
-        box_frame = ttk.Frame(self, height=300)
+        ttk.Label(self.master, text='Tabelas disponiveis para migração\nSelecione as tabelas que deseja migrar:').pack(padx=20, pady=10)
+        box_frame = ttk.Frame(self.master, height=300)
         box_frame.pack(fill='x', expand=True)
 
         scrollBar = tk.Scrollbar(box_frame, orient='vertical')
@@ -810,21 +808,21 @@ class Oracle2Postgres(etl_UI):
 
         scrollBar.config(command=listbox.yview)
 
-        ttk.Button(self, text='Selecionar todos', command=lambda: listbox.select_set(0, tk.END)).pack(anchor='w', padx=20)
+        ttk.Button(self.master, text='Selecionar todos', command=lambda: listbox.select_set(0, tk.END)).pack(anchor='w', padx=20)
 
         s_mode = tk.IntVar()
         user_migration = tk.BooleanVar()
         user_migration.set(False)
 
-        c1 = ttk.Radiobutton(self, text='Migrar todos os procedimentos relacionados', variable=s_mode, value=0)
+        c1 = ttk.Radiobutton(self.master, text='Migrar todos os procedimentos relacionados', variable=s_mode, value=0)
         c1.pack(padx=10)
-        c2 = ttk.Radiobutton(self, text='Migrar todos os procedimentos na base de dados', variable=s_mode, value=1)
+        c2 = ttk.Radiobutton(self.master, text='Migrar todos os procedimentos na base de dados', variable=s_mode, value=1)
         c2.pack(padx=10)
-        c3 = ttk.Radiobutton(self, text='Selecionar os procedimentos manualmente', variable=s_mode, value=2)
+        c3 = ttk.Radiobutton(self.master, text='Selecionar os procedimentos manualmente', variable=s_mode, value=2)
         c3.pack(padx=10)
         c1.invoke()
 
-        ttk.Checkbutton(self, text=f'Migrar usuário (Cria usuário {user} em Postgres com suas devidas permissões)', variable=user_migration, onvalue=True, offvalue=False).pack(padx=10, pady=20)
+        ttk.Checkbutton(self.master, text=f'Migrar usuário (Cria usuário {user} em Postgres com suas devidas permissões)', variable=user_migration, onvalue=True, offvalue=False).pack(padx=10, pady=20)
 
         lower_frame = ttk.Frame(self)
         lower_frame.pack(expand=True)
@@ -1386,7 +1384,7 @@ class Oracle2Postgres(etl_UI):
                     pass
                 else:
                     return
-            etl_session = Oracle2PostgresETL(self.master, pg_conf, ora_conf, self.user, tables, sources, self.etl, self.pg_jar, self.ora_jar, self.pg_schema, self.setup, self.table_data, 'direct')
+            etl_session = Oracle2PostgresETL(self, pg_conf, ora_conf, self.user, tables, sources, self.etl, self.pg_jar, self.ora_jar, self.pg_schema, self.setup, self.table_data, 'direct')
             self.write2log(f"migrando tabelas {tables} e sources {sources} do Oracle schema '{self.user}' para Postgres database {self.pg_database} schema '{self.pg_schema}'!")
             self.active_sessions.append(etl_session)
             # Começa a migração
